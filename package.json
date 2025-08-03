@@ -33,7 +33,14 @@
     "clean": "forge clean",
     "install-forge": "forge install",
     "deploy:core-testnet": "forge script script/Deploy.s.sol --rpc-url core_testnet --broadcast --verify",
-    "deploy:core-mainnet": "forge script script/Deploy.s.sol --rpc-url core --broadcast --verify"
+    "deploy:core-mainnet": "forge script script/Deploy.s.sol --rpc-url core --broadcast --verify",
+    "vercel:build": "npm run build",
+    "vercel:dev": "vercel dev",
+    "vercel:deploy": "vercel --prod",
+    "vercel:preview": "vercel",
+    "pre-deploy": "npm run lint && npm run build",
+    "post-deploy": "echo 'Deployment completed successfully! 🚀'",
+    "check-env": "node -e \"console.log('Environment check:', process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ? '✅ WalletConnect configured' : '❌ WalletConnect missing')\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

@@ -1,25 +1,42 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "pnpm run build",
-  "installCommand": "pnpm install",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
   "outputDirectory": ".next",
   "env": {
     "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID": "@walletconnect_project_id",
     "NEXT_PUBLIC_CORE_RPC_URL": "@core_rpc_url",
-    "NEXT_PUBLIC_CORE_CHAIN_ID": "@core_chain_id"
+    "NEXT_PUBLIC_CORE_CHAIN_ID": "@core_chain_id",
+    "NEXT_PUBLIC_CORE_MAINNET_RPC_URL": "@core_mainnet_rpc_url",
+    "NEXT_PUBLIC_CORE_MAINNET_CHAIN_ID": "@core_mainnet_chain_id",
+    "NEXT_PUBLIC_APP_NAME": "@app_name",
+    "NEXT_PUBLIC_APP_URL": "@app_url",
+    "NEXT_PUBLIC_ENABLE_TESTNET": "@enable_testnet"
   },
   "build": {
     "env": {
       "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID": "@walletconnect_project_id",
       "NEXT_PUBLIC_CORE_RPC_URL": "@core_rpc_url",
-      "NEXT_PUBLIC_CORE_CHAIN_ID": "@core_chain_id"
+      "NEXT_PUBLIC_CORE_CHAIN_ID": "@core_chain_id",
+      "NEXT_PUBLIC_CORE_MAINNET_RPC_URL": "@core_mainnet_rpc_url",
+      "NEXT_PUBLIC_CORE_MAINNET_CHAIN_ID": "@core_mainnet_chain_id",
+      "NEXT_PUBLIC_APP_NAME": "@app_name",
+      "NEXT_PUBLIC_APP_URL": "@app_url",
+      "NEXT_PUBLIC_ENABLE_TESTNET": "@enable_testnet"
     }
   },
   "functions": {
     "app/**/*.{js,ts,tsx}": {
       "maxDuration": 30
+    },
+    "pages/api/**/*.{js,ts}": {
+      "maxDuration": 30
     }
   },
+  "regions": ["sin1", "hnd1", "sfo1"],
+  "cleanUrls": true,
+  "trailingSlash": false,
   "headers": [
     {
       "source": "/(.*)",
