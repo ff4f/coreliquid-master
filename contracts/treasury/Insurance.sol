@@ -135,7 +135,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         uint256 duration,
         IInsurance.PolicyType policyType,
         bytes calldata riskData
-    ) external override payable nonReentrant whenNotPaused returns (bytes32) {
+    ) external payable nonReentrant whenNotPaused returns (bytes32) {
         require(coverageAsset != address(0), "Invalid coverage asset");
         require(coverageAmount >= config.minCoverageAmount, "Coverage amount too small");
         require(coverageAmount <= config.maxCoverageAmount, "Coverage amount too large");
@@ -207,9 +207,8 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         metrics.lastPolicy = block.timestamp;
         
         IInsurance.PolicyMetrics storage policyMetrics_ = policyMetrics[policyId];
-        policyMetrics_.policyId = policyId;
-        policyMetrics_.createdAt = block.timestamp;
-        policyMetrics_.premiumAmount = premiumAmount;
+        policyMetrics_.lastUpdate = block.timestamp;
+        policyMetrics_.totalPremiumPaid = premiumAmount;
         
         totalPolicies++;
         totalPremiumsCollected += premiumAmount;
@@ -235,7 +234,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         uint256 claimAmount,
         string calldata description,
         bytes calldata evidence
-    ) external override nonReentrant returns (bytes32) {
+    ) external nonReentrant returns (bytes32) {
         require(isPolicyActive[policyId], "Policy not active");
         
         InsurancePolicy storage policy = policies[policyId];
@@ -300,7 +299,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         bool approved,
         uint256 approvedAmount,
         string calldata assessmentNotes
-    ) external override onlyRole(CLAIMS_ASSESSOR_ROLE) {
+    ) external onlyRole(CLAIMS_ASSESSOR_ROLE) {
         require(isClaimActive[claimId], "Claim not active");
         
         Claim storage claim = claims[claimId];
@@ -358,14 +357,14 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
 
     function processClaim(
         bytes32 claimId
-    ) external override onlyRole(CLAIMS_ASSESSOR_ROLE) nonReentrant {
+    ) external onlyRole(CLAIMS_ASSESSOR_ROLE) nonReentrant {
         _processClaim(claimId);
     }
 
     function updateCoverage(
         address coverageAsset,
         uint256 newCoverageAmount
-    ) external override {
+    ) external {
         require(isCoverageActive[msg.sender], "No active coverage");
         require(coverageAsset != address(0), "Invalid coverage asset");
         require(newCoverageAmount >= config.minCoverageAmount, "Coverage amount too small");
@@ -390,7 +389,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         address underwriter,
         uint256 stakeAmount,
         uint256 capacity
-    ) external override onlyRole(INSURANCE_MANAGER_ROLE) {
+    ) external onlyRole(INSURANCE_MANAGER_ROLE) {
         require(underwriter != address(0), "Invalid underwriter");
         require(stakeAmount >= config.underwriterStakeRequired, "Insufficient stake");
         require(capacity > 0, "Invalid capacity");
@@ -413,7 +412,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
 
     function removeUnderwriter(
         address underwriter
-    ) external override onlyRole(INSURANCE_MANAGER_ROLE) {
+    ) external onlyRole(INSURANCE_MANAGER_ROLE) {
         require(isUnderwriterActive[underwriter], "Underwriter not active");
         
         underwriters[underwriter].isActive = false;
@@ -428,7 +427,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         address poolAsset,
         uint256 initialBalance,
         uint256 maxCapacity
-    ) external override onlyRole(INSURANCE_MANAGER_ROLE) {
+    ) external onlyRole(INSURANCE_MANAGER_ROLE) {
         require(poolAsset != address(0), "Invalid pool asset");
         require(initialBalance >= config.poolMinimumBalance, "Initial balance too small");
         require(maxCapacity > initialBalance, "Invalid max capacity");
@@ -452,7 +451,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
     function addLiquidityToPool(
         address poolAsset,
         uint256 amount
-    ) external override nonReentrant {
+    ) external nonReentrant {
         require(isPoolActive[poolAsset], "Pool not active");
         require(amount > 0, "Invalid amount");
         
@@ -475,7 +474,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
     function removeLiquidityFromPool(
         address poolAsset,
         uint256 amount
-    ) external override nonReentrant {
+    ) external nonReentrant {
         require(isPoolActive[poolAsset], "Pool not active");
         require(amount > 0, "Invalid amount");
         require(poolBalances[msg.sender][poolAsset] >= amount, "Insufficient balance");
@@ -496,14 +495,14 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
     }
 
     // Emergency functions
-    function emergencyPause() external override onlyRole(EMERGENCY_ROLE) {
+    function emergencyPause() external onlyRole(EMERGENCY_ROLE) {
         emergencyMode = true;
         _pause();
         
         emit EmergencyPause(msg.sender, block.timestamp);
     }
 
-    function emergencyUnpause() external override onlyRole(EMERGENCY_ROLE) {
+    function emergencyUnpause() external onlyRole(EMERGENCY_ROLE) {
         emergencyMode = false;
         _unpause();
         
@@ -512,8 +511,9 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
 
     function emergencyClaimPayout(
         bytes32 claimId,
-        uint256 amount
-    ) external override onlyRole(EMERGENCY_ROLE) {
+        uint256 amount,
+        string calldata reason
+    ) external onlyRole(EMERGENCY_ROLE) {
         require(emergencyMode, "Not in emergency mode");
         require(isClaimActive[claimId], "Claim not active");
         
@@ -536,7 +536,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
     }
 
     // View functions
-    function getPolicy(bytes32 policyId) external view returns (IInsurance.InsurancePolicy memory) {
+    function getPolicy(bytes32 policyId) external view returns (IInsurance.Policy memory) {
         return policies[policyId];
     }
 
@@ -596,7 +596,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
         return pendingClaims;
     }
 
-    function getUserPolicies(address user) external view override returns (bytes32[] memory) {
+    function getUserPolicies(address user) external view returns (bytes32[] memory) {
         return userPolicies[user];
     }
 

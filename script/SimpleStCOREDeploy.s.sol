@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import "../lib/forge-std/src/Script.sol";
 import "../lib/forge-std/src/console.sol";
-import "../contracts/StCOREToken.sol";
+import "../contracts/core/StCOREToken.sol";
 
 contract SimpleStCOREDeployScript is Script {
     function run() external {

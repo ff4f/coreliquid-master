@@ -7,13 +7,13 @@ import "forge-std/console.sol";
 // Import all contracts
 import "../contracts/core/CoreNativeStaking.sol";
 import "../contracts/core/StCOREToken.sol";
-import "../contracts/MainLiquidityPool.sol";
-import "../contracts/UnifiedLPToken.sol";
+import "../contracts/core/MainLiquidityPool.sol";
+import "../contracts/tokens/UnifiedLPToken.sol";
 import "../contracts/core/CoreRevenueModel.sol";
-import "../contracts/RiskEngine.sol";
+import "../contracts/common/RiskEngine.sol";
 import "../contracts/deposit/DepositManager.sol";
-import "../contracts/LendingMarket.sol";
-import "../contracts/CoreLiquidProtocol.sol";
+import "../contracts/borrow/LendingMarket.sol";
+import "../contracts/core/CoreLiquidProtocol.sol";
 import "../contracts/deposit/DepositGuard.sol";
 import "../contracts/deposit/TransferProxy.sol";
 import "../contracts/deposit/RatioCalculator.sol";

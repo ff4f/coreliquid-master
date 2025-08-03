@@ -7,12 +7,12 @@ import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
 // Import Core contracts
-import "../contracts/CoreLiquidProtocol.sol";
+import "../contracts/core/CoreLiquidProtocol.sol";
 import "../contracts/core/CoreNativeStaking.sol";
 import "../contracts/core/StCOREToken.sol";
 import "../contracts/core/CoreRevenueModel.sol";
 import "../contracts/core/UnifiedLiquidityPool.sol";
-import "../contracts/UnifiedLPToken.sol";
+import "../contracts/tokens/UnifiedLPToken.sol";
 import "../contracts/deposit/DepositManager.sol";
 import "../contracts/borrow/LendingMarket.sol";
 import "../contracts/common/RiskEngine.sol";

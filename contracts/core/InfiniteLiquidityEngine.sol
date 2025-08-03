@@ -2094,7 +2094,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         emit EmergencyLiquidityActivated(
             asset,
             emergencyAmount,
-            reason,
+            1, // sourceCount
             block.timestamp
         );
         
@@ -2138,12 +2138,11 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         bool autoRebalance
     ) external onlyRole(LIQUIDITY_MANAGER_ROLE) {
         optimizationConfigs[asset] = OptimizationConfig({
-            targetUtilization: targetUtilization,
             rebalanceThreshold: rebalanceThreshold,
-            maxSlippage: maxSlippage,
-            gasOptimization: 5000, // Default gas optimization
-            autoRebalance: autoRebalance,
-            lastUpdate: block.timestamp
+            efficiencyTarget: targetUtilization,
+            gasOptimizationLevel: 5000, // Default gas optimization
+            slippageTolerance: maxSlippage,
+            autoOptimize: autoRebalance
         });
     }
     
@@ -2342,12 +2341,13 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
     ) external view returns (bool needsOpt, string memory reason) {
         OptimizationConfig storage config = optimizationConfigs[asset];
         
-        if (block.timestamp - config.lastUpdate > 3600) { // 1 hour
-            return (true, "Optimization overdue");
+        // Check if optimization is needed based on efficiency target
+        if (!config.autoOptimize) {
+            return (false, "Auto optimization disabled");
         }
         
         LiquidityMetrics memory metrics = this.getLiquidityMetrics(asset);
-        if (metrics.utilizationRate > config.targetUtilization + config.rebalanceThreshold) {
+        if (metrics.utilizationRate > config.efficiencyTarget + config.rebalanceThreshold) {
             return (true, "High utilization");
         }
         
@@ -2466,7 +2466,9 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         bytes32 poolId
     ) external view returns (uint256) {
         VirtualLiquidityPool storage pool = virtualPools[poolId];
-        return pool.efficiency;
+        // Calculate efficiency based on available metrics
+        if (pool.virtualReserveA == 0 && pool.virtualReserveB == 0) return 0;
+        return (pool.amplificationFactor * pool.feeRate) / 100;
     }
     
     function getActiveRoutes(
@@ -2531,7 +2533,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         
         // Count active flash loans
         for (uint256 i = 0; i < userLoans.length; i++) {
-            if (!flashLoans[userLoans[i]].isRepaid) {
+            if (flashLoans[userLoans[i]].isActive) {
                 activeCount++;
             }
         }
@@ -2541,7 +2543,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         uint256 index = 0;
         
         for (uint256 i = 0; i < userLoans.length; i++) {
-            if (!flashLoans[userLoans[i]].isRepaid) {
+            if (flashLoans[userLoans[i]].isActive) {
                 activeLoans[index] = userLoans[i];
                 index++;
             }

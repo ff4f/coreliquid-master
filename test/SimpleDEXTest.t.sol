@@ -3,8 +3,8 @@ pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
 import "forge-std/console2.sol";
-import "../contracts/MainLiquidityPool.sol";
-import "../contracts/UnifiedLPToken.sol";
+import "../contracts/core/MainLiquidityPool.sol";
+import "../contracts/tokens/UnifiedLPToken.sol";
 import "../simple_token_deploy/src/SimpleToken.sol";
 
 /**

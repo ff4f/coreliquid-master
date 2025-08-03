@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Script.sol";
-import "../contracts/SimpleToken.sol";
+import "../contracts/tokens/SimpleToken.sol";
 
 contract DeploySimpleTokenOnly is Script {
     function run() external {

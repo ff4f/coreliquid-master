@@ -2,8 +2,8 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
-import "../contracts/CoreBitcoinDualStaking.sol";
-import "../contracts/SimpleToken.sol";
+import "../contracts/staking/CoreBitcoinDualStaking.sol";
+import "../contracts/tokens/SimpleToken.sol";
 
 contract CoreBitcoinDualStakingTest is Test {
     CoreBitcoinDualStaking public dualStaking;
