@@ -6,21 +6,21 @@ import "forge-std/console.sol";
 
 // Import all contracts
 import "../contracts/core/CoreNativeStaking.sol";
-import "../contracts/core/StCOREToken.sol";
-import "../contracts/MainLiquidityPool.sol";
-import "../contracts/UnifiedLPToken.sol";
+import "../contracts/staking/StCOREToken.sol";
+import "../contracts/core/MainLiquidityPool.sol";
+import "../contracts/tokens/UnifiedLPToken.sol";
 import "../contracts/core/CoreRevenueModel.sol";
-import "../contracts/RiskEngine.sol";
-import "../contracts/deposit/DepositManager.sol";
-import "../contracts/LendingMarket.sol";
-import "../contracts/CoreLiquidProtocol.sol";
-import "../contracts/deposit/DepositGuard.sol";
-import "../contracts/deposit/TransferProxy.sol";
-import "../contracts/deposit/RatioCalculator.sol";
-import "../contracts/deposit/RangeCalculator.sol";
-import "../contracts/deposit/UniswapV3Router.sol";
-import "../contracts/apr/APROptimizer.sol";
-import "../contracts/deposit/PositionNFT.sol";
+import "../contracts/risk/RiskEngine.sol";
+import "../contracts/utils/DepositManager.sol";
+import "../contracts/lending/LendingMarket.sol";
+import "../contracts/core/CoreLiquidProtocol.sol";
+import "../contracts/utils/DepositGuard.sol";
+import "../contracts/utils/TransferProxy.sol";
+import "../contracts/utils/RatioCalculator.sol";
+import "../contracts/utils/RangeCalculator.sol";
+import "../contracts/utils/UniswapV3Router.sol";
+import "../contracts/utils/APROptimizer.sol";
+import "../contracts/tokens/PositionNFT.sol";
 
 /**
  * @title CoreLiquid Protocol Deployment Script
