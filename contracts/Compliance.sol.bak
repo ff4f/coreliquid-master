@@ -36,6 +36,20 @@ contract Compliance is IComplianceEngine, AccessControl, ReentrancyGuard, Pausab
         uint256 lastReset;
     }
 
+    enum AMLRiskLevel {
+        LOW,
+        MEDIUM,
+        HIGH,
+        CRITICAL
+    }
+
+    enum VerificationLevel {
+        NONE,
+        BASIC,
+        ENHANCED,
+        INSTITUTIONAL
+    }
+
     struct RiskAssessment {
         uint256 riskScore;
         AMLRiskLevel riskLevel;
@@ -221,12 +235,11 @@ contract Compliance is IComplianceEngine, AccessControl, ReentrancyGuard, Pausab
         KYCData storage kyc = kycData[user];
         kyc.user = user;
         kyc.documentHash = documentHash;
-        kyc.level = level;
-        kyc.status = KYCStatus.PENDING;
-        kyc.submissionDate = block.timestamp;
+        kyc.verificationLevel = VerificationLevel(uint8(level));
+        kyc.isVerified = false;
         kyc.expiryDate = expiryDate;
-        kyc.provider = msg.sender;
-        kyc.isActive = true;
+        kyc.verifier = msg.sender;
+        kyc.isVerified = false;
         
         if (!isUserActive[user]) {
             allUsers.push(user);

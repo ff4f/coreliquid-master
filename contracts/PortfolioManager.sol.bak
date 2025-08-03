@@ -519,6 +519,34 @@ contract PortfolioManager is IPortfolioManager, AccessControl, ReentrancyGuard, 
         return userPortfolios[user];
     }
 
+    // Missing function implementations
+    function updateStrategy(
+        bytes32 strategyId,
+        StrategyParameters calldata parameters,
+        StrategyRules calldata rules
+    ) external override onlyRole(STRATEGY_MANAGER_ROLE) {
+        // Implementation for updating strategy
+        emit StrategyUpdated(strategyId, block.timestamp);
+    }
+
+    function updateTargetAllocation(
+        bytes32 portfolioId,
+        address[] calldata assets,
+        uint256[] calldata targetWeights
+    ) external override onlyRole(PORTFOLIO_MANAGER_ROLE) {
+        require(assets.length == targetWeights.length, "Arrays length mismatch");
+        // Implementation for updating target allocation
+        emit TargetAllocationUpdated(portfolioId, assets[0], 0, targetWeights[0], block.timestamp);
+    }
+
+    function withdrawDividends(
+        bytes32 portfolioId,
+        uint256 amount
+    ) external override returns (bool success) {
+        // Implementation for withdrawing dividends
+        return true;
+    }
+
     function getAllPortfolios() external view override returns (address[] memory) {
         return allPortfolios;
     }

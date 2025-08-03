@@ -535,10 +535,11 @@ contract Analytics is IAnalytics, AccessControl, ReentrancyGuard, Pausable {
         Report storage report = reports[reportId];
         
         // Generate summary metrics
-        report.data.summaryMetrics["totalMetrics"] = totalMetricsRecorded;
-        report.data.summaryMetrics["totalDashboards"] = totalDashboardsCreated;
-        report.data.summaryMetrics["totalReports"] = totalReportsGenerated;
-        report.data.summaryMetrics["totalAlerts"] = totalAlertsTriggered;
+        report.data.summaryMetrics = new uint256[](4);
+        report.data.summaryMetrics[0] = totalMetricsRecorded;
+        report.data.summaryMetrics[1] = totalDashboardsCreated;
+        report.data.summaryMetrics[2] = totalReportsGenerated;
+        report.data.summaryMetrics[3] = totalAlertsTriggered;
         
         // Set report metrics
         report.metrics.totalDataPoints = allMetrics.length;

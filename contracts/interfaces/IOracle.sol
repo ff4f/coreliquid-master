@@ -244,7 +244,6 @@ interface IOracle {
         FeedMetrics metrics;
         PriceHistory history;
         address[] oracles;
-        mapping(address => OracleInfo) oracleInfo;
     }
     
     struct FeedConfig {

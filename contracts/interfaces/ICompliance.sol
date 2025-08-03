@@ -198,10 +198,10 @@ interface ICompliance {
     }
     
     struct RuleParameters {
-        mapping(string => uint256) numericalParams;
-        mapping(string => bool) booleanParams;
-        mapping(string => string) stringParams;
-        mapping(string => address) addressParams;
+        uint256[] numericalParams;
+        bool[] booleanParams;
+        string[] stringParams;
+        address[] addressParams;
         uint256 lastUpdate;
     }
     
