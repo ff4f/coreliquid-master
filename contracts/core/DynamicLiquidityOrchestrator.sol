@@ -772,10 +772,16 @@ contract DynamicLiquidityOrchestrator is AccessControl, ReentrancyGuard, Pausabl
         IERC20(asset).safeTransfer(address(unifiedLiquidity), amount);
         
         // Execute allocation through unified liquidity
+        // Convert address to protocol string (simplified mapping)
+        string memory protocolName = "LENDING"; // Default protocol
+        if (protocol == address(0x1)) protocolName = "DEX";
+        else if (protocol == address(0x2)) protocolName = "VAULT";
+        else if (protocol == address(0x3)) protocolName = "STAKING";
+        
         bool success = unifiedLiquidity.allocateToProtocol(
             asset,
             amount,
-            protocol
+            protocolName
         );
         
         require(success, "Allocation failed");

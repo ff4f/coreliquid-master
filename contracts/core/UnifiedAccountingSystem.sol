@@ -554,4 +554,36 @@ contract UnifiedAccountingSystem is AccessControl, ReentrancyGuard {
     function getCrossProtocolTransaction(uint256 txId) external view returns (CrossProtocolTransaction memory) {
         return crossProtocolTxs[txId];
     }
+    
+    /**
+     * @dev Update cross-protocol position for user
+     */
+    function updateCrossProtocolPosition(
+        address user,
+        address asset,
+        uint256 amount,
+        bool isInflow
+    ) external onlyRole(PROTOCOL_ROLE) {
+        AssetAccount storage assetAccount = assetAccounts[user][asset];
+        
+        if (isInflow) {
+            assetAccount.totalBalance += amount;
+            assetAccount.availableBalance += amount;
+        } else {
+            require(assetAccount.availableBalance >= amount, "Insufficient balance");
+            assetAccount.totalBalance -= amount;
+            assetAccount.availableBalance -= amount;
+        }
+        
+        // Update unified account metrics
+        _syncAllProtocolPositions(user);
+        _calculateUnifiedMetrics(user);
+        
+        emit AccountUpdated(
+            user,
+            unifiedAccounts[user].totalNetWorth,
+            unifiedAccounts[user].healthFactor,
+            block.timestamp
+        );
+    }
 }

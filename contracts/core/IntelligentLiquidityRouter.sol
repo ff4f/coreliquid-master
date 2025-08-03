@@ -20,12 +20,17 @@ import "../interfaces/IIdleCapitalManager.sol";
  * @dev Advanced routing system that intelligently directs liquidity to optimal destinations
  * @author CoreLiquid Protocol
  */
-contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable {
+contract IntelligentLiquidityRouter is
+    AccessControl,
+    ReentrancyGuard,
+    Pausable
+{
     using SafeERC20 for IERC20;
     using Math for uint256;
 
     // Roles
-    bytes32 public constant ROUTER_MANAGER_ROLE = keccak256("ROUTER_MANAGER_ROLE");
+    bytes32 public constant ROUTER_MANAGER_ROLE =
+        keccak256("ROUTER_MANAGER_ROLE");
     bytes32 public constant KEEPER_ROLE = keccak256("KEEPER_ROLE");
     bytes32 public constant ORACLE_ROLE = keccak256("ORACLE_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
@@ -126,10 +131,10 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     mapping(address => RouteExecution[]) public userRouteHistory;
     mapping(address => IntelligentMetrics) public assetMetrics;
     mapping(bytes32 => RouteOptimization) public routeOptimizations;
-    
+
     address[] public supportedAssets;
     RouteDestination[] public globalRoutes;
-    
+
     // Global metrics
     uint256 public totalIntelligentVolume;
     uint256 public totalOptimizationsPerformed;
@@ -145,7 +150,7 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256 totalYield,
         uint256 timestamp
     );
-    
+
     event RouteOptimized(
         address indexed asset,
         uint256 oldYield,
@@ -153,14 +158,14 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256 improvement,
         uint256 timestamp
     );
-    
+
     event EmergencyRouteActivated(
         address indexed asset,
         address indexed protocol,
         uint256 amount,
         uint256 timestamp
     );
-    
+
     event RoutingStrategyUpdated(
         address indexed user,
         uint256 riskTolerance,
@@ -170,7 +175,7 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
 
     constructor(
         address _unifiedLiquidity,
-        address _infiniteLiquidity,
+        address payable _infiniteLiquidity,
         address _integrationHub,
         address _oracleRouter,
         address _vaultManager,
@@ -181,15 +186,18 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         require(_integrationHub != address(0), "Invalid integration hub");
         require(_oracleRouter != address(0), "Invalid oracle router");
         require(_vaultManager != address(0), "Invalid vault manager");
-        require(_idleCapitalManager != address(0), "Invalid idle capital manager");
-        
+        require(
+            _idleCapitalManager != address(0),
+            "Invalid idle capital manager"
+        );
+
         unifiedLiquidity = UnifiedLiquidityLayer(_unifiedLiquidity);
         infiniteLiquidity = InfiniteLiquidityEngine(_infiniteLiquidity);
         integrationHub = SeamlessIntegrationHub(_integrationHub);
         oracleRouter = IOracleRouter(_oracleRouter);
         vaultManager = IVaultManager(_vaultManager);
         idleCapitalManager = IIdleCapitalManager(_idleCapitalManager);
-        
+
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ROUTER_MANAGER_ROLE, msg.sender);
         _grantRole(KEEPER_ROLE, msg.sender);
@@ -207,22 +215,35 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     ) external nonReentrant whenNotPaused returns (uint256 totalYield) {
         require(asset != address(0), "Invalid asset");
         require(amount >= MIN_ROUTE_AMOUNT, "Amount too small");
-        
+
         // Transfer asset from user
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        
+
         // Get optimal routes and allocations
-        RouteDestination[] memory routes = _getOptimalRoutes(asset, amount, strategy);
-        uint256[] memory allocations = _calculateOptimalAllocations(asset, amount, routes, strategy);
-        
+        RouteDestination[] memory routes = _getOptimalRoutes(
+            asset,
+            amount,
+            strategy
+        );
+        uint256[] memory allocations = _calculateOptimalAllocations(
+            asset,
+            amount,
+            routes,
+            strategy
+        );
+
         // Execute routes
-        uint256[] memory actualYields = _executeRoutes(asset, routes, allocations);
-        
+        uint256[] memory actualYields = _executeRoutes(
+            asset,
+            routes,
+            allocations
+        );
+
         // Calculate total yield
         for (uint256 i = 0; i < actualYields.length; i++) {
             totalYield += actualYields[i];
         }
-        
+
         // Record execution
         RouteExecution memory execution = RouteExecution({
             user: msg.sender,
@@ -237,17 +258,17 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
             isSuccessful: true,
             isOptimal: _isOptimalExecution(totalYield, amount, strategy)
         });
-        
+
         userRouteHistory[msg.sender].push(execution);
-        
+
         // Update metrics
         _updateIntelligentMetrics(asset, amount, totalYield, gasleft());
-        
+
         // Update global metrics
         totalIntelligentVolume += amount;
         totalYieldGenerated += totalYield;
         totalOptimizationsPerformed++;
-        
+
         emit IntelligentRouteExecuted(
             msg.sender,
             asset,
@@ -267,48 +288,56 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         RoutingStrategy memory strategy
     ) internal view returns (RouteDestination[] memory) {
         RouteDestination[] memory availableRoutes = assetRoutes[asset];
-        RouteDestination[] memory optimalRoutes = new RouteDestination[](strategy.maxRoutes);
-        
+        RouteDestination[] memory optimalRoutes = new RouteDestination[](
+            strategy.maxRoutes
+        );
+
         uint256 routeCount = 0;
-        
+
         // Score and sort routes
         uint256[] memory scores = new uint256[](availableRoutes.length);
-        
+
         for (uint256 i = 0; i < availableRoutes.length; i++) {
             if (!availableRoutes[i].isActive) continue;
-            
+
             scores[i] = _calculateRouteScore(
                 availableRoutes[i],
                 amount,
                 strategy
             );
         }
-        
+
         // Select top routes
-        for (uint256 i = 0; i < strategy.maxRoutes && routeCount < availableRoutes.length; i++) {
+        for (
+            uint256 i = 0;
+            i < strategy.maxRoutes && routeCount < availableRoutes.length;
+            i++
+        ) {
             uint256 bestIndex = 0;
             uint256 bestScore = 0;
-            
+
             for (uint256 j = 0; j < availableRoutes.length; j++) {
                 if (scores[j] > bestScore) {
                     bestScore = scores[j];
                     bestIndex = j;
                 }
             }
-            
+
             if (bestScore > 0) {
                 optimalRoutes[routeCount] = availableRoutes[bestIndex];
                 scores[bestIndex] = 0; // Mark as used
                 routeCount++;
             }
         }
-        
+
         // Resize array to actual count
-        RouteDestination[] memory finalRoutes = new RouteDestination[](routeCount);
+        RouteDestination[] memory finalRoutes = new RouteDestination[](
+            routeCount
+        );
         for (uint256 i = 0; i < routeCount; i++) {
             finalRoutes[i] = optimalRoutes[i];
         }
-        
+
         return finalRoutes;
     }
 
@@ -321,41 +350,49 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         RoutingStrategy memory strategy
     ) internal view returns (uint256) {
         uint256 score = 0;
-        
+
         // Yield score (40% weight)
         if (strategy.prioritizeYield) {
             score += (route.expectedYield * 4000) / BASIS_POINTS;
         } else {
             score += (route.expectedYield * 2000) / BASIS_POINTS;
         }
-        
+
         // Risk score (30% weight) - lower risk = higher score
         uint256 riskScore = BASIS_POINTS - route.riskScore;
         score += (riskScore * 3000) / BASIS_POINTS;
-        
+
         // Liquidity score (20% weight)
         if (strategy.prioritizeLiquidity) {
-            uint256 liquidityScore = Math.min(route.liquidityDepth * BASIS_POINTS / amount, BASIS_POINTS);
+            uint256 liquidityScore = Math.min(
+                (route.liquidityDepth * BASIS_POINTS) / amount,
+                BASIS_POINTS
+            );
             score += (liquidityScore * 2000) / BASIS_POINTS;
         } else {
-            uint256 liquidityScore = Math.min(route.liquidityDepth * BASIS_POINTS / amount, BASIS_POINTS);
+            uint256 liquidityScore = Math.min(
+                (route.liquidityDepth * BASIS_POINTS) / amount,
+                BASIS_POINTS
+            );
             score += (liquidityScore * 1000) / BASIS_POINTS;
         }
-        
+
         // Gas efficiency score (10% weight)
-        uint256 gasScore = route.gasCost > 0 ? BASIS_POINTS / route.gasCost : BASIS_POINTS;
+        uint256 gasScore = route.gasCost > 0
+            ? BASIS_POINTS / route.gasCost
+            : BASIS_POINTS;
         score += (gasScore * 1000) / BASIS_POINTS;
-        
+
         // Risk tolerance check
         if (route.riskScore > strategy.riskTolerance) {
             score = score / 2; // Penalize high-risk routes
         }
-        
+
         // Emergency route penalty
         if (route.isEmergencyRoute && !strategy.allowEmergencyRoutes) {
             score = 0;
         }
-        
+
         return score;
     }
 
@@ -370,36 +407,40 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     ) internal view returns (uint256[] memory) {
         uint256[] memory allocations = new uint256[](routes.length);
         uint256 remainingAmount = totalAmount;
-        
+
         // Calculate total score for proportional allocation
         uint256 totalScore = 0;
         uint256[] memory routeScores = new uint256[](routes.length);
-        
+
         for (uint256 i = 0; i < routes.length; i++) {
-            routeScores[i] = _calculateRouteScore(routes[i], totalAmount, strategy);
+            routeScores[i] = _calculateRouteScore(
+                routes[i],
+                totalAmount,
+                strategy
+            );
             totalScore += routeScores[i];
         }
-        
+
         // Allocate proportionally based on scores
         for (uint256 i = 0; i < routes.length && remainingAmount > 0; i++) {
             if (totalScore == 0) break;
-            
+
             uint256 allocation = (totalAmount * routeScores[i]) / totalScore;
-            
+
             // Apply min/max constraints
             allocation = Math.max(allocation, strategy.minAllocationPerRoute);
             allocation = Math.min(allocation, strategy.maxAllocationPerRoute);
             allocation = Math.min(allocation, remainingAmount);
-            
+
             allocations[i] = allocation;
             remainingAmount -= allocation;
         }
-        
+
         // Distribute any remaining amount to the best route
         if (remainingAmount > 0 && routes.length > 0) {
             allocations[0] += remainingAmount;
         }
-        
+
         return allocations;
     }
 
@@ -412,15 +453,11 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256[] memory allocations
     ) internal returns (uint256[] memory actualYields) {
         actualYields = new uint256[](routes.length);
-        
+
         for (uint256 i = 0; i < routes.length; i++) {
             if (allocations[i] == 0) continue;
-            
-            actualYields[i] = _executeRoute(
-                asset,
-                routes[i],
-                allocations[i]
-            );
+
+            actualYields[i] = _executeRoute(asset, routes[i], allocations[i]);
         }
     }
 
@@ -433,8 +470,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256 amount
     ) internal returns (uint256 actualYield) {
         // Approve asset for the route protocol
-        IERC20(asset).safeApprove(route.protocol, amount);
-        
+        IERC20(asset).forceApprove(route.protocol, amount);
+
         if (route.routeType == RouteType.LENDING) {
             actualYield = _executeLendingRoute(asset, route.protocol, amount);
         } else if (route.routeType == RouteType.DEX_TRADING) {
@@ -446,11 +483,15 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         } else if (route.routeType == RouteType.INFINITE_LIQUIDITY) {
             actualYield = _executeInfiniteRoute(asset, amount);
         } else if (route.routeType == RouteType.CROSS_PROTOCOL) {
-            actualYield = _executeCrossProtocolRoute(asset, route.protocol, amount);
+            actualYield = _executeCrossProtocolRoute(
+                asset,
+                route.protocol,
+                amount
+            );
         }
-        
+
         // Reset approval
-        IERC20(asset).safeApprove(route.protocol, 0);
+        IERC20(asset).forceApprove(route.protocol, 0);
     }
 
     /**
@@ -461,7 +502,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToLending(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "LENDING");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -472,7 +514,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToDex(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "DEX");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -483,7 +526,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToVault(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "VAULT");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -494,7 +538,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToStaking(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "STAKING");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -540,18 +585,20 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256 gasCost
     ) internal {
         IntelligentMetrics storage metrics = assetMetrics[asset];
-        
+
         metrics.totalRoutingVolume += amount;
         metrics.totalRoutesExecuted++;
-        
+
         // Calculate yield improvement (simplified)
         uint256 baselineYield = (amount * 300) / BASIS_POINTS; // 3% baseline
         if (yield > baselineYield) {
-            uint256 improvement = ((yield - baselineYield) * BASIS_POINTS) / baselineYield;
-            metrics.averageYieldImprovement = 
-                (metrics.averageYieldImprovement + improvement) / 2;
+            uint256 improvement = ((yield - baselineYield) * BASIS_POINTS) /
+                baselineYield;
+            metrics.averageYieldImprovement =
+                (metrics.averageYieldImprovement + improvement) /
+                2;
         }
-        
+
         metrics.totalGasSaved += gasCost;
         metrics.lastOptimization = block.timestamp;
     }
@@ -565,24 +612,25 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     ) external onlyRole(ROUTER_MANAGER_ROLE) {
         require(asset != address(0), "Invalid asset");
         require(route.protocol != address(0), "Invalid protocol");
-        
+
         assetRoutes[asset].push(route);
         globalRoutes.push(route);
-        
+
         _addSupportedAsset(asset);
     }
 
     /**
      * @dev Update routing strategy for user
      */
-    function updateRoutingStrategy(
-        RoutingStrategy memory strategy
-    ) external {
+    function updateRoutingStrategy(RoutingStrategy memory strategy) external {
         require(strategy.maxRoutes <= MAX_ROUTES, "Too many routes");
-        require(strategy.riskTolerance <= BASIS_POINTS, "Invalid risk tolerance");
-        
+        require(
+            strategy.riskTolerance <= BASIS_POINTS,
+            "Invalid risk tolerance"
+        );
+
         userStrategies[msg.sender] = strategy;
-        
+
         emit RoutingStrategyUpdated(
             msg.sender,
             strategy.riskTolerance,
@@ -602,36 +650,52 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     }
 
     // View functions
-    function getAssetRoutes(address asset) external view returns (RouteDestination[] memory) {
+    function getAssetRoutes(
+        address asset
+    ) external view returns (RouteDestination[] memory) {
         return assetRoutes[asset];
     }
-    
-    function getUserStrategy(address user) external view returns (RoutingStrategy memory) {
+
+    function getUserStrategy(
+        address user
+    ) external view returns (RoutingStrategy memory) {
         return userStrategies[user];
     }
-    
-    function getUserRouteHistory(address user) external view returns (RouteExecution[] memory) {
+
+    function getUserRouteHistory(
+        address user
+    ) external view returns (RouteExecution[] memory) {
         return userRouteHistory[user];
     }
-    
-    function getAssetMetrics(address asset) external view returns (IntelligentMetrics memory) {
+
+    function getAssetMetrics(
+        address asset
+    ) external view returns (IntelligentMetrics memory) {
         return assetMetrics[asset];
     }
-    
+
     function getSupportedAssets() external view returns (address[] memory) {
         return supportedAssets;
     }
-    
-    function getGlobalRoutes() external view returns (RouteDestination[] memory) {
+
+    function getGlobalRoutes()
+        external
+        view
+        returns (RouteDestination[] memory)
+    {
         return globalRoutes;
     }
-    
-    function getTotalStats() external view returns (
-        uint256 totalVolume,
-        uint256 totalOptimizations,
-        uint256 totalYield,
-        uint256 totalGasOptimized
-    ) {
+
+    function getTotalStats()
+        external
+        view
+        returns (
+            uint256 totalVolume,
+            uint256 totalOptimizations,
+            uint256 totalYield,
+            uint256 totalGasOptimized
+        )
+    {
         return (
             totalIntelligentVolume,
             totalOptimizationsPerformed,
@@ -647,20 +711,31 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address asset,
         uint256 amount,
         RoutingStrategy memory strategy
-    ) external view returns (
-        RouteDestination[] memory routes,
-        uint256[] memory allocations,
-        uint256 expectedTotalYield,
-        uint256 estimatedGasCost
-    ) {
+    )
+        external
+        view
+        returns (
+            RouteDestination[] memory routes,
+            uint256[] memory allocations,
+            uint256 expectedTotalYield,
+            uint256 estimatedGasCost
+        )
+    {
         routes = _getOptimalRoutes(asset, amount, strategy);
-        allocations = _calculateOptimalAllocations(asset, amount, routes, strategy);
-        
+        allocations = _calculateOptimalAllocations(
+            asset,
+            amount,
+            routes,
+            strategy
+        );
+
         // Calculate expected total yield
         for (uint256 i = 0; i < routes.length; i++) {
-            expectedTotalYield += (allocations[i] * routes[i].expectedYield) / BASIS_POINTS;
+            expectedTotalYield +=
+                (allocations[i] * routes[i].expectedYield) /
+                BASIS_POINTS;
         }
-        
+
         // Estimate gas cost
         estimatedGasCost = routes.length * 100000; // 100k gas per route
     }
@@ -671,11 +746,11 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
     function pause() external onlyRole(EMERGENCY_ROLE) {
         _pause();
     }
-    
+
     function unpause() external onlyRole(EMERGENCY_ROLE) {
         _unpause();
     }
-    
+
     function emergencyWithdraw(
         address asset,
         uint256 amount,
