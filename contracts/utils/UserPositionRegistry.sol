@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "../common/RiskEngine.sol";
+import "../risk/RiskEngine.sol";
 
 contract UserPositionRegistry {
     struct UserPosition {

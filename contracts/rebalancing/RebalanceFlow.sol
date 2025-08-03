@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./AutoRebalanceManager.sol";
 import "./TickOptimizer.sol";
-import "../apr/APROptimizer.sol";
+import "../utils/APROptimizer.sol";
 
 /**
  * @title RebalanceFlow

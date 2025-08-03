@@ -1,247 +1,236 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.19;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title RangeCalculator
- * @dev Utility library for calculating price ranges and tick positions for Uniswap V3
+ * @dev Calculates optimal tick ranges for Uniswap v3 positions
  */
-library RangeCalculator {
+contract RangeCalculator is Ownable {
     using Math for uint256;
     
-    uint256 public constant Q96 = 2**96;
+    struct TickRange {
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 expectedFees;
+        uint256 capitalEfficiency;
+    }
+    
+    struct VolatilityData {
+        uint256 shortTermVol;
+        uint256 longTermVol;
+        uint256 avgVol;
+    }
+    
+    mapping(address => VolatilityData) public poolVolatility;
+    mapping(int24 => bool) public validTickSpacings;
+    
     int24 public constant MIN_TICK = -887272;
     int24 public constant MAX_TICK = 887272;
     
-    /**
-     * @dev Calculate tick from price
-     * @param price The price as a Q64.96 fixed point number
-     * @return tick The corresponding tick
-     */
-    function getTickFromPrice(uint160 price) internal pure returns (int24 tick) {
-        require(price > 0, "RangeCalculator: price must be greater than 0");
+    event TickRangeSelected(
+        address indexed pool,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 currentPrice,
+        uint256 volatility
+    );
+    
+    constructor(address initialOwner) Ownable(initialOwner) {
+        // Initialize common tick spacings
+        validTickSpacings[1] = true;   // 0.01% fee
+        validTickSpacings[10] = true;  // 0.05% fee
+        validTickSpacings[60] = true;  // 0.3% fee
+        validTickSpacings[200] = true; // 1% fee
+    }
+    
+    function setValidTickSpacing(int24 spacing, bool valid) external onlyOwner {
+        validTickSpacings[spacing] = valid;
+    }
+    
+    function updateVolatility(
+        address pool,
+        uint256 shortTerm,
+        uint256 longTerm
+    ) external onlyOwner {
+        poolVolatility[pool] = VolatilityData({
+            shortTermVol: shortTerm,
+            longTermVol: longTerm,
+            avgVol: (shortTerm + longTerm) / 2
+        });
+    }
+    
+    function selectTicks(
+        uint256 currentPrice,
+        address pool,
+        int24 tickSpacing
+    ) external returns (int24 tickLower, int24 tickUpper) {
+        require(validTickSpacings[tickSpacing], "Invalid tick spacing");
         
-        // Simplified tick calculation - in production, use Uniswap's TickMath library
-        // This is a basic approximation
-        uint256 ratio = uint256(price) * uint256(price) / Q96;
+        // Use proper Uniswap V3 tick calculation: tick = log_1.0001(price)
+        int24 currentTick = _priceToTick(currentPrice);
+        VolatilityData memory vol = poolVolatility[pool];
         
-        if (ratio >= Q96) {
-            tick = int24(int256(Math.log2(ratio / Q96) * 10000));
-        } else {
-            tick = -int24(int256(Math.log2(Q96 / ratio) * 10000));
+        // Calculate range based on volatility using proper tick math
+        uint256 volatility = vol.avgVol > 0 ? vol.avgVol : 2000; // Default 20% if no data
+        
+        // Convert volatility percentage to tick range using log formula
+        // For 20% volatility: log_1.0001(1.2) ≈ 1823 ticks
+        int24 range = int24(uint24((volatility * 9116) / 1000)); // Approximation of log_1.0001(1 + vol/10000)
+        
+        // Ensure minimum range for fee collection (at least 10 tick spacings)
+        if (range < tickSpacing * 10) {
+            range = tickSpacing * 10;
         }
         
-        // Ensure tick is within bounds
+        // Calculate symmetric range around current tick
+        tickLower = currentTick - range;
+        tickUpper = currentTick + range;
+        
+        // Align to tick spacing
+        tickLower = (tickLower / tickSpacing) * tickSpacing;
+        tickUpper = (tickUpper / tickSpacing) * tickSpacing;
+        
+        // Ensure valid bounds
+        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
+        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
+        
+        emit TickRangeSelected(pool, tickLower, tickUpper, currentPrice, volatility);
+    }
+    
+    /**
+     * @dev Convert price to tick using Uniswap V3 formula: tick = log_1.0001(price)
+     * @param price The price in Q96 format (price * 2^96)
+     */
+    function _priceToTick(uint256 price) internal pure returns (int24 tick) {
+        require(price > 0, "Price must be greater than 0");
+        
+        // Convert to Q128 format for better precision
+        uint256 ratio = price;
+        
+        // Use binary search approximation for log calculation
+        int256 log_2 = 0;
+        
+        if (ratio >= 0x100000000000000000000000000000000) {
+            ratio >>= 128;
+            log_2 += 128 << 64;
+        }
+        if (ratio >= 0x10000000000000000) {
+            ratio >>= 64;
+            log_2 += 64 << 64;
+        }
+        if (ratio >= 0x100000000) {
+            ratio >>= 32;
+            log_2 += 32 << 64;
+        }
+        if (ratio >= 0x10000) {
+            ratio >>= 16;
+            log_2 += 16 << 64;
+        }
+        if (ratio >= 0x100) {
+            ratio >>= 8;
+            log_2 += 8 << 64;
+        }
+        if (ratio >= 0x10) {
+            ratio >>= 4;
+            log_2 += 4 << 64;
+        }
+        if (ratio >= 0x4) {
+            ratio >>= 2;
+            log_2 += 2 << 64;
+        }
+        if (ratio >= 0x2) {
+            log_2 += 1 << 64;
+        }
+        
+        // Convert log_2 to log_1.0001 by dividing by log_2(1.0001)
+        // log_2(1.0001) ≈ 0.000144269504088896
+        tick = int24((log_2 * 255738958999603826347141) >> 128);
+        
+        // Ensure tick is within valid range
         if (tick < MIN_TICK) tick = MIN_TICK;
         if (tick > MAX_TICK) tick = MAX_TICK;
     }
     
-    /**
-     * @dev Calculate price from tick
-     * @param tick The tick value
-     * @return price The corresponding price as Q64.96
-     */
-    function getPriceFromTick(int24 tick) internal pure returns (uint160 price) {
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "RangeCalculator: tick out of range");
+    function selectOptimalTicks(
+        uint256 currentPrice,
+        address pool,
+        int24 tickSpacing,
+        uint256 targetCapitalEfficiency
+    ) external view returns (TickRange memory) {
+        require(validTickSpacings[tickSpacing], "Invalid tick spacing");
         
-        // Simplified price calculation - in production, use Uniswap's TickMath library
-        if (tick >= 0) {
-            uint256 ratio = Q96 * (2 ** uint256(int256(tick / 10000)));
-            price = uint160(Math.sqrt(ratio));
-        } else {
-            uint256 ratio = Q96 / (2 ** uint256(int256(-tick / 10000)));
-            price = uint160(Math.sqrt(ratio));
-        }
-    }
-    
-    /**
-     * @dev Calculate optimal range around current price
-     * @param currentPrice Current price as Q64.96
-     * @param rangePercent Range percentage (e.g., 10 for ±10%)
-     * @return tickLower Lower tick boundary
-     * @return tickUpper Upper tick boundary
-     */
-    function calculateOptimalRange(
-        uint160 currentPrice,
-        uint256 rangePercent
-    ) internal pure returns (int24 tickLower, int24 tickUpper) {
-        require(rangePercent > 0 && rangePercent <= 100, "RangeCalculator: invalid range percent");
+        int24 currentTick = int24(int256(currentPrice / 1e12)); // Simplified tick calculation
+        VolatilityData memory vol = poolVolatility[pool];
         
-        int24 currentTick = getTickFromPrice(currentPrice);
-        
-        // Calculate tick spacing based on range percentage
-        int24 tickSpacing = int24(int256(rangePercent * 100)); // Simplified spacing
-        
-        tickLower = currentTick - tickSpacing;
-        tickUpper = currentTick + tickSpacing;
-        
-        // Ensure ticks are within bounds
-        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
-        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
-        
-        // Ensure tickLower < tickUpper
-        require(tickLower < tickUpper, "RangeCalculator: invalid tick range");
-    }
-    
-    /**
-     * @dev Calculate range based on volatility
-     * @param currentPrice Current price as Q64.96
-     * @param volatility Historical volatility (basis points)
-     * @param timeHorizon Time horizon in seconds
-     * @return tickLower Lower tick boundary
-     * @return tickUpper Upper tick boundary
-     */
-    function calculateVolatilityBasedRange(
-        uint160 currentPrice,
-        uint256 volatility,
-        uint256 timeHorizon
-    ) internal pure returns (int24 tickLower, int24 tickUpper) {
-        require(volatility > 0, "RangeCalculator: volatility must be positive");
-        require(timeHorizon > 0, "RangeCalculator: time horizon must be positive");
-        
-        int24 currentTick = getTickFromPrice(currentPrice);
-        
-        // Calculate expected price movement based on volatility and time
-        // Simplified calculation: volatility * sqrt(timeHorizon / 1 year)
-        uint256 timeAdjustment = Math.sqrt(timeHorizon * 1e18 / (365 * 86400));
-        uint256 expectedMovement = volatility * timeAdjustment / 1e9; // Convert from basis points
-        
-        int24 tickMovement = int24(int256(expectedMovement));
-        
-        tickLower = currentTick - tickMovement;
-        tickUpper = currentTick + tickMovement;
-        
-        // Ensure ticks are within bounds
-        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
-        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
-        
-        require(tickLower < tickUpper, "RangeCalculator: invalid tick range");
-    }
-    
-    /**
-     * @dev Calculate concentrated liquidity range
-     * @param currentPrice Current price as Q64.96
-     * @param concentrationFactor Concentration factor (1-100, higher = more concentrated)
-     * @return tickLower Lower tick boundary
-     * @return tickUpper Upper tick boundary
-     */
-    function calculateConcentratedRange(
-        uint160 currentPrice,
-        uint256 concentrationFactor
-    ) internal pure returns (int24 tickLower, int24 tickUpper) {
-        require(
-            concentrationFactor >= 1 && concentrationFactor <= 100,
-            "RangeCalculator: invalid concentration factor"
-        );
-        
-        int24 currentTick = getTickFromPrice(currentPrice);
-        
-        // Higher concentration factor = smaller range
-        int24 tickSpacing = int24(int256(10000 / concentrationFactor));
-        
-        tickLower = currentTick - tickSpacing;
-        tickUpper = currentTick + tickSpacing;
-        
-        // Ensure ticks are within bounds
-        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
-        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
-        
-        require(tickLower < tickUpper, "RangeCalculator: invalid tick range");
-    }
-    
-    /**
-     * @dev Calculate range for maximum fee collection
-     * @param currentPrice Current price as Q64.96
-     * @param feeGrowthRate Expected fee growth rate (basis points per day)
-     * @param targetDuration Target duration for position (days)
-     * @return tickLower Lower tick boundary
-     * @return tickUpper Upper tick boundary
-     */
-    function calculateFeeOptimizedRange(
-        uint160 currentPrice,
-        uint256 feeGrowthRate,
-        uint256 targetDuration
-    ) internal pure returns (int24 tickLower, int24 tickUpper) {
-        require(feeGrowthRate > 0, "RangeCalculator: fee growth rate must be positive");
-        require(targetDuration > 0, "RangeCalculator: target duration must be positive");
-        
-        int24 currentTick = getTickFromPrice(currentPrice);
-        
-        // Calculate optimal range based on fee collection vs. impermanent loss trade-off
-        // Higher fee growth rate allows for tighter ranges
-        uint256 rangeMultiplier = 10000 / (feeGrowthRate * targetDuration / 365);
-        int24 tickSpacing = int24(int256(rangeMultiplier));
-        
-        // Ensure minimum range
-        if (tickSpacing < 100) tickSpacing = 100;
-        if (tickSpacing > 5000) tickSpacing = 5000;
-        
-        tickLower = currentTick - tickSpacing;
-        tickUpper = currentTick + tickSpacing;
-        
-        // Ensure ticks are within bounds
-        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
-        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
-        
-        require(tickLower < tickUpper, "RangeCalculator: invalid tick range");
-    }
-    
-    /**
-     * @dev Check if current price is within range
-     * @param currentPrice Current price as Q64.96
-     * @param tickLower Lower tick boundary
-     * @param tickUpper Upper tick boundary
-     * @return inRange True if price is within range
-     */
-    function isPriceInRange(
-        uint160 currentPrice,
-        int24 tickLower,
-        int24 tickUpper
-    ) internal pure returns (bool inRange) {
-        int24 currentTick = getTickFromPrice(currentPrice);
-        return currentTick >= tickLower && currentTick <= tickUpper;
-    }
-    
-    /**
-     * @dev Calculate distance from current price to range boundaries
-     * @param currentPrice Current price as Q64.96
-     * @param tickLower Lower tick boundary
-     * @param tickUpper Upper tick boundary
-     * @return distanceToLower Distance to lower boundary (negative if below)
-     * @return distanceToUpper Distance to upper boundary (negative if above)
-     */
-    function calculateDistanceToRange(
-        uint160 currentPrice,
-        int24 tickLower,
-        int24 tickUpper
-    ) internal pure returns (int24 distanceToLower, int24 distanceToUpper) {
-        int24 currentTick = getTickFromPrice(currentPrice);
-        
-        distanceToLower = currentTick - tickLower;
-        distanceToUpper = tickUpper - currentTick;
-    }
-    
-    /**
-     * @dev Calculate range utilization percentage
-     * @param currentPrice Current price as Q64.96
-     * @param tickLower Lower tick boundary
-     * @param tickUpper Upper tick boundary
-     * @return utilization Utilization percentage (0-100)
-     */
-    function calculateRangeUtilization(
-        uint160 currentPrice,
-        int24 tickLower,
-        int24 tickUpper
-    ) internal pure returns (uint256 utilization) {
-        if (!isPriceInRange(currentPrice, tickLower, tickUpper)) {
-            return 0;
+        // Dynamic range based on target capital efficiency
+        uint256 baseRange = 1000; // Base range in ticks
+        if (targetCapitalEfficiency > 80) {
+            baseRange = 500; // Tighter range for higher efficiency
+        } else if (targetCapitalEfficiency < 50) {
+            baseRange = 2000; // Wider range for lower efficiency
         }
         
-        int24 currentTick = getTickFromPrice(currentPrice);
-        int24 rangeSize = tickUpper - tickLower;
-        int24 positionInRange = currentTick - tickLower;
+        // Adjust for volatility
+        if (vol.avgVol > 0) {
+            baseRange = (baseRange * vol.avgVol) / 1000;
+        }
         
-        utilization = uint256(int256(positionInRange)) * 100 / uint256(int256(rangeSize));
+        int24 range = int24(uint24(baseRange));
+        int24 tickLower = ((currentTick - range) / tickSpacing) * tickSpacing;
+        int24 tickUpper = ((currentTick + range) / tickSpacing) * tickSpacing;
+        
+        // Bounds check
+        if (tickLower < MIN_TICK) tickLower = MIN_TICK;
+        if (tickUpper > MAX_TICK) tickUpper = MAX_TICK;
+        
+        return TickRange({
+            tickLower: tickLower,
+            tickUpper: tickUpper,
+            expectedFees: estimateFees(tickLower, tickUpper, currentTick),
+            capitalEfficiency: calculateCapitalEfficiency(tickLower, tickUpper, currentTick)
+        });
+    }
+    
+    // Removed Uniswap base price formula implementation
+    
+    function estimateFees(
+        int24 tickLower,
+        int24 tickUpper,
+        int24 currentTick
+    ) internal pure returns (uint256) {
+        // Simplified fee estimation based on range width
+        uint256 rangeWidth = uint256(uint24(tickUpper - tickLower));
+        uint256 distanceFromCurrent = currentTick >= tickLower && currentTick <= tickUpper ? 0 : 
+            uint256(uint24(currentTick < tickLower ? tickLower - currentTick : currentTick - tickUpper));
+        
+        // Higher fees for narrower ranges and positions in range
+        uint256 baseFee = 1000000 / rangeWidth; // Inverse relationship
+        if (distanceFromCurrent == 0) {
+            baseFee = baseFee * 2; // Double fees if in range
+        }
+        
+        return baseFee;
+    }
+    
+    function calculateCapitalEfficiency(
+        int24 tickLower,
+        int24 tickUpper,
+        int24 currentTick
+    ) internal pure returns (uint256) {
+        uint256 rangeWidth = uint256(uint24(tickUpper - tickLower));
+        uint256 maxRange = uint256(uint24(MAX_TICK - MIN_TICK));
+        
+        // Capital efficiency is inverse of range width
+        uint256 efficiency = (maxRange * 100) / rangeWidth;
+        
+        // Bonus if current price is in range
+        if (currentTick >= tickLower && currentTick <= tickUpper) {
+            efficiency = efficiency * 120 / 100; // 20% bonus
+        }
+        
+        return efficiency > 100 ? 100 : efficiency;
     }
 }

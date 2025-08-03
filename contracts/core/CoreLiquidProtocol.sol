@@ -9,25 +9,24 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 
 
 // Import all major components
-import "../deposit/DepositManager.sol";
-import "../rebalance/AutoRebalanceManager.sol";
-import "../rebalance/RebalanceFlow.sol";
+import "../utils/DepositManager.sol";
+import "../rebalancing/AutoRebalanceManager.sol";
+import "../rebalancing/RebalanceFlow.sol";
 import "../lending/BorrowEngine.sol";
 import "../lending/CollateralManager.sol";
 import "../lending/InterestRateModel.sol";
 import "../lending/LiquidationEngine.sol";
 import "../vault/VaultManager.sol";
 import "../vault/VaultStrategyBase.sol";
-import "../yield/YieldAggregator.sol";
-import "../yield/YieldOptimizer.sol";
-import "../yield/YieldStrategy.sol";
-// import "../apr/APRCalculator.sol"; // APRCalculator functionality integrated into core contracts
-import "../apr/APROptimizer.sol";
+import "../vault/YieldAggregator.sol";
+import "../vault/YieldOptimizer.sol";
+import "../vault/YieldStrategy.sol";
+// import "../utils/APRCalculator.sol"; // APRCalculator functionality integrated into core contracts
+import "../utils/APROptimizer.sol";
 
 // Import Core Chain native integrations
 import "./CoreNativeStaking.sol";
-import "./StCOREToken.sol";
-import "./CoreValidatorIntegration.sol";
+import "../staking/StCOREToken.sol";
 
 /**
  * @title CoreLiquidProtocol
