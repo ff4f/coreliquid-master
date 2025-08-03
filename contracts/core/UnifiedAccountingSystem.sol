@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./UnifiedLiquidityLayer.sol";
 import "../lending/BorrowEngine.sol";
-import "../MainLiquidityPool.sol";
+// removed wrong import of ../MainLiquidityPool.sol
 import "../vault/VaultManager.sol";
+import "./MainLiquidityPool.sol";
 
 /**
  * @title UnifiedAccountingSystem
@@ -113,7 +114,7 @@ contract UnifiedAccountingSystem is AccessControl, ReentrancyGuard {
     uint256 public nextTxId = 1;
     uint256 public constant PRECISION = 1e18;
     uint256 public constant BASIS_POINTS = 10000;
-    uint256 public constant MIN_HEALTH_FACTOR = 1.1 * PRECISION; // 110%
+    uint256 public constant MIN_HEALTH_FACTOR = 11e17; // 110%
     
     // Supported protocols
     string[] public supportedProtocols = ["lending", "dex", "vault", "staking"];

@@ -75,6 +75,29 @@ contract RiskEngine is Ownable, ReentrancyGuard {
         collateralManager = CollateralManager(_collateralManager);
     }
     
+    /**
+     * @dev Calculate a simple risk score for an asset based on stored parameters.
+     * @param asset The asset address
+     * @return score Risk score scaled by 1e18 (higher = riskier)
+     */
+    function calculateRiskScore(address asset) external view returns (uint256 score) {
+        AssetRiskParams storage params = assetRiskParams[asset];
+        if (!params.isActive) {
+            return 0;
+        }
+        // Higher liquidationThreshold -> safer asset, so invert.
+        uint256 base = params.liquidationThreshold > 0 ? params.liquidationThreshold : 1;
+        // Risk score is normalized: (MAX - threshold) / MAX scaled to 1e18
+        score = ( (9500 - base) * 1e18 ) / 9500;
+    }
+
+    /**
+     * @dev Alias for backwards-compatibility with other modules.
+     */
+    function calculateAssetRisk(address asset) external view returns (uint256) {
+        return this.calculateRiskScore(asset);
+    }
+
     function getHealthFactor(address user) external view returns (uint256) {
         return _calculateHealthFactor(user);
     }

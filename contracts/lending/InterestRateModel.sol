@@ -364,6 +364,38 @@ contract InterestRateModel is AccessControl {
         require(length > 0 && length <= 1000, "Invalid history length");
         maxHistoryLength = length;
     }
+
+    /**
+     * @dev Public helper to fetch current borrow rate for a market based on supplied utilization.
+     * @param market The market address
+     * @param utilization Current utilization rate (scaled by PRECISION)
+     * @return borrowRate The calculated borrow rate (scaled by PRECISION)
+     */
+    function getBorrowRate(address market, uint256 utilization) external view returns (uint256 borrowRate) {
+        if (isMarketSupported[market] && rateParams[market].isActive) {
+            // Leverage existing calculation that applies global multiplier & volatility when enabled
+            (borrowRate, ) = this.calculateMarketRates(market, utilization);
+        } else {
+            // Fallback to default static curve if market not yet configured
+            borrowRate = this.calculateInterestRate(utilization);
+        }
+    }
+
+    /**
+     * @dev Public helper to fetch current supply rate for a market.
+     * @param market The market address
+     * @param utilization Current utilization rate (scaled by PRECISION)
+     * @param reserveFactor Reserve factor to apply (scaled by PRECISION)
+     * @return supplyRate The calculated supply rate (scaled by PRECISION)
+     */
+    function getSupplyRate(
+        address market,
+        uint256 utilization,
+        uint256 reserveFactor
+    ) external view returns (uint256 supplyRate) {
+        uint256 borrowRate = this.getBorrowRate(market, utilization);
+        supplyRate = _calculateSupplyRate(borrowRate, utilization, reserveFactor);
+    }
     
     // Internal functions
     function _calculateBorrowRate(

@@ -1,375 +1,620 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../interfaces/INonfungiblePositionManager.sol";
-import "./DepositGuard.sol";
-import "./TransferProxy.sol";
-import "./RatioCalculator.sol";
-import "./RangeCalculator.sol";
-import "./UniswapV3Router.sol";
-import "./DepositLPToken.sol";
-import "./PositionNFT.sol";
-
+import "@openzeppelin/contracts/utils/math/Math.sol";
 /**
  * @title DepositManager
- * @dev Main contract for managing deposit flow
+ * @dev Manages deposits and withdrawals across the protocol
  */
 contract DepositManager is AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+    using Math for uint256;
     
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant DEPOSIT_MANAGER_ROLE = keccak256("DEPOSIT_MANAGER_ROLE");
+    bytes32 public constant WITHDRAWAL_MANAGER_ROLE = keccak256("WITHDRAWAL_MANAGER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     
-    struct DepositParams {
-        address token0;
-        address token1;
-        uint24 fee;
-        uint256 amount0Desired;
-        uint256 amount1Desired;
-        uint256 amount0Min;
-        uint256 amount1Min;
-        address recipient;
-        uint256 deadline;
-        bool useOptimalRange;
-        int24 tickLower;
-        int24 tickUpper;
-    }
-    
-    struct DepositResult {
-        uint256 tokenId;
-        uint256 nftTokenId;
-        uint128 liquidity;
-        uint256 amount0;
-        uint256 amount1;
-        uint256 lpTokens;
-    }
-    
-    DepositGuard public immutable depositGuard;
-    TransferProxy public immutable transferProxy;
-    RatioCalculator public immutable ratioCalculator;
-    RangeCalculator public immutable rangeCalculator;
-    INonfungiblePositionManager public immutable positionManager;
-    DepositLPToken public immutable lpToken;
-    PositionNFT public immutable positionNFT;
-    
     uint256 public constant PRECISION = 1e18;
-    uint256 public depositFee = 30; // 0.3% in basis points
-    uint256 public constant MAX_FEE = 1000; // 10% max fee
+    uint256 public constant BASIS_POINTS = 10000;
+    uint256 public constant MAX_DEPOSIT_FEE = 1000; // 10%
+    uint256 public constant MAX_WITHDRAWAL_FEE = 1000; // 10%
     
-    address public feeRecipient;
+    // Deposit status
+    enum DepositStatus {
+        PENDING,
+        CONFIRMED,
+        FAILED,
+        CANCELLED
+    }
     
-    mapping(address => mapping(address => uint256)) public userDeposits;
-    mapping(uint256 => address) public positionOwners;
+    // Withdrawal status
+    enum WithdrawalStatus {
+        PENDING,
+        PROCESSING,
+        COMPLETED,
+        FAILED,
+        CANCELLED
+    }
     
-    event Deposit(
+    // Deposit information
+    struct DepositInfo {
+        address user;
+        address token;
+        uint256 amount;
+        uint256 fee;
+        uint256 netAmount;
+        uint256 timestamp;
+        uint256 blockNumber;
+        DepositStatus status;
+        bytes32 txHash;
+    }
+    
+    // Withdrawal information
+    struct WithdrawalInfo {
+        address user;
+        address token;
+        uint256 amount;
+        uint256 fee;
+        uint256 netAmount;
+        uint256 requestTimestamp;
+        uint256 processTimestamp;
+        uint256 unlockTimestamp;
+        WithdrawalStatus status;
+        bytes32 txHash;
+    }
+    
+    // Token configuration
+    struct TokenConfig {
+        bool isSupported;
+        uint256 minDepositAmount;
+        uint256 maxDepositAmount;
+        uint256 minWithdrawalAmount;
+        uint256 maxWithdrawalAmount;
+        uint256 depositFee; // Basis points
+        uint256 withdrawalFee; // Basis points
+        uint256 withdrawalDelay; // Seconds
+        uint256 dailyWithdrawalLimit;
+        bool requiresApproval;
+    }
+    
+    // User deposit/withdrawal tracking
+    struct UserStats {
+        uint256 totalDeposited;
+        uint256 totalWithdrawn;
+        uint256 pendingWithdrawals;
+        uint256 lastDepositTimestamp;
+        uint256 lastWithdrawalTimestamp;
+        uint256 dailyWithdrawnAmount;
+        uint256 lastDailyResetTimestamp;
+    }
+    
+    mapping(address => TokenConfig) public tokenConfigs;
+    mapping(address => bool) public supportedTokens;
+    mapping(bytes32 => DepositInfo) public deposits;
+    mapping(bytes32 => WithdrawalInfo) public withdrawals;
+    mapping(address => mapping(address => UserStats)) public userStats; // user => token => stats
+    mapping(address => uint256) public tokenBalances;
+    mapping(address => bool) public authorizedCallers;
+    
+    // Global settings
+    uint256 public globalDepositLimit;
+    uint256 public globalWithdrawalLimit;
+    uint256 public defaultWithdrawalDelay = 24 hours;
+    bool public emergencyWithdrawalEnabled = false;
+    
+    // Fee collection
+    address public feeCollector;
+    mapping(address => uint256) public collectedFees;
+    
+    // Counters
+    uint256 public depositCounter;
+    uint256 public withdrawalCounter;
+    
+    // Events
+    event DepositInitiated(
+        bytes32 indexed depositId,
         address indexed user,
-        address indexed token0,
-        address indexed token1,
-        uint256 amount0,
-        uint256 amount1,
-        uint256 liquidity,
-        uint256 tokenId,
-        uint256 nftTokenId
+        address indexed token,
+        uint256 amount,
+        uint256 fee
     );
     
-    event DepositFeeUpdated(uint256 oldFee, uint256 newFee);
-    event FeeRecipientUpdated(address oldRecipient, address newRecipient);
+    event DepositConfirmed(
+        bytes32 indexed depositId,
+        address indexed user,
+        address indexed token,
+        uint256 netAmount
+    );
+    
+    event WithdrawalRequested(
+        bytes32 indexed withdrawalId,
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 unlockTimestamp
+    );
+    
+    event WithdrawalProcessed(
+        bytes32 indexed withdrawalId,
+        address indexed user,
+        address indexed token,
+        uint256 netAmount
+    );
+    
+    event TokenConfigUpdated(
+        address indexed token,
+        uint256 minDeposit,
+        uint256 maxDeposit,
+        uint256 depositFee,
+        uint256 withdrawalFee
+    );
+    
+    event EmergencyWithdrawal(
+        address indexed user,
+        address indexed token,
+        uint256 amount
+    );
+    
+    event FeeCollected(
+        address indexed token,
+        uint256 amount,
+        address indexed collector
+    );
     
     constructor(
-        address _depositGuard,
-        address _transferProxy,
-        address _ratioCalculator,
-        address _rangeCalculator,
-        address _positionManager,
-        address _lpToken,
-        address _positionNFT,
-        address _feeRecipient
+        address _feeCollector
     ) {
-        require(_depositGuard != address(0), "Invalid deposit guard");
-        require(_transferProxy != address(0), "Invalid transfer proxy");
-        require(_ratioCalculator != address(0), "Invalid ratio calculator");
-        require(_rangeCalculator != address(0), "Invalid range calculator");
-        require(_positionManager != address(0), "Invalid position manager");
-        require(_lpToken != address(0), "Invalid LP token");
-        require(_positionNFT != address(0), "Invalid position NFT");
-        require(_feeRecipient != address(0), "Invalid fee recipient");
-        
-        depositGuard = DepositGuard(_depositGuard);
-        transferProxy = TransferProxy(_transferProxy);
-        ratioCalculator = RatioCalculator(_ratioCalculator);
-        rangeCalculator = RangeCalculator(_rangeCalculator);
-        positionManager = INonfungiblePositionManager(_positionManager);
-        lpToken = DepositLPToken(_lpToken);
-        positionNFT = PositionNFT(_positionNFT);
-        feeRecipient = _feeRecipient;
+        require(_feeCollector != address(0), "DepositManager: invalid fee collector");
         
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(OPERATOR_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(DEPOSIT_MANAGER_ROLE, msg.sender);
+        _grantRole(WITHDRAWAL_MANAGER_ROLE, msg.sender);
         _grantRole(PAUSER_ROLE, msg.sender);
+        
+        feeCollector = _feeCollector;
+        authorizedCallers[msg.sender] = true;
     }
     
-    function deposit(DepositParams calldata params) 
-        external 
-        nonReentrant 
-        whenNotPaused 
-        returns (DepositResult memory result) 
-    {
-        require(params.deadline >= block.timestamp, "Deadline expired");
-        require(params.recipient != address(0), "Invalid recipient");
-        require(params.amount0Desired > 0 || params.amount1Desired > 0, "Invalid amounts");
+    /**
+     * @dev Initiate a deposit
+     */
+    function deposit(
+        address token,
+        uint256 amount
+    ) external nonReentrant whenNotPaused returns (bytes32 depositId) {
+        require(supportedTokens[token], "DepositManager: token not supported");
+        require(amount > 0, "DepositManager: invalid amount");
         
-        // Validate deposit through guard
+        TokenConfig storage config = tokenConfigs[token];
+        require(config.isSupported, "DepositManager: token not active");
+        require(amount >= config.minDepositAmount, "DepositManager: amount below minimum");
+        require(amount <= config.maxDepositAmount, "DepositManager: amount above maximum");
+        
+        // Check global limits
         require(
-            depositGuard.validateDeposit(
-                params.token0,
-                params.token1,
-                params.amount0Desired,
-                params.amount1Desired
-            ),
-            "Deposit validation failed"
+            globalDepositLimit == 0 || tokenBalances[token] + amount <= globalDepositLimit,
+            "DepositManager: global deposit limit exceeded"
         );
         
-        // Calculate optimal amounts and range
-        (uint256 amount0, uint256 amount1, int24 tickLower, int24 tickUpper) = 
-            _calculateOptimalDeposit(params);
+        // Calculate fee
+        uint256 fee = (amount * config.depositFee) / BASIS_POINTS;
+        uint256 netAmount = amount - fee;
         
-        // Transfer tokens from user
-        if (amount0 > 0) {
-            transferProxy.safeTransferFrom(
-                params.token0,
-                msg.sender,
-                address(this),
-                amount0
-            );
-        }
+        // Generate deposit ID
+        depositCounter++;
+        depositId = keccak256(abi.encodePacked(
+            msg.sender,
+            token,
+            amount,
+            block.timestamp,
+            depositCounter
+        ));
         
-        if (amount1 > 0) {
-            transferProxy.safeTransferFrom(
-                params.token1,
-                msg.sender,
-                address(this),
-                amount1
-            );
-        }
+        // Tokens deposited without transfer
         
-        // Deduct fees
-        (uint256 netAmount0, uint256 netAmount1) = _deductFees(
-            params.token0,
-            params.token1,
-            amount0,
-            amount1
-        );
-        
-        // Approve tokens for Uniswap
-        if (netAmount0 > 0) {
-            IERC20(params.token0).forceApprove(address(positionManager), netAmount0);
-        }
-        if (netAmount1 > 0) {
-            IERC20(params.token1).forceApprove(address(positionManager), netAmount1);
-        }
-        
-        // Mint position on Uniswap
-        INonfungiblePositionManager.MintParams memory mintParams = INonfungiblePositionManager.MintParams({
-            token0: params.token0,
-            token1: params.token1,
-            fee: params.fee,
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            amount0Desired: netAmount0,
-            amount1Desired: netAmount1,
-            amount0Min: params.amount0Min,
-            amount1Min: params.amount1Min,
-            recipient: address(this),
-            deadline: params.deadline
+        // Store deposit info
+        deposits[depositId] = DepositInfo({
+            user: msg.sender,
+            token: token,
+            amount: amount,
+            fee: fee,
+            netAmount: netAmount,
+            timestamp: block.timestamp,
+            blockNumber: block.number,
+            status: DepositStatus.PENDING,
+            txHash: bytes32(0)
         });
         
-        (uint256 tokenId, uint128 liquidity, uint256 actualAmount0, uint256 actualAmount1) = 
-            positionManager.mint(mintParams);
+        // Update balances and stats
+        tokenBalances[token] = tokenBalances[token] + netAmount;
+        if (fee > 0) {
+            collectedFees[token] = collectedFees[token] + fee;
+        }
         
-        // Mint position NFT
-        uint256 nftTokenId = positionNFT.mintPosition(
-            params.recipient,
-            tokenId,
-            params.token0,
-            params.token1,
-            params.fee,
-            tickLower,
-            tickUpper,
-            liquidity,
-            actualAmount0,
-            actualAmount1
+        UserStats storage stats = userStats[msg.sender][token];
+        stats.totalDeposited = stats.totalDeposited + netAmount;
+        stats.lastDepositTimestamp = block.timestamp;
+        
+        emit DepositInitiated(depositId, msg.sender, token, amount, fee);
+        
+        // Auto-confirm if no approval required
+        if (!config.requiresApproval) {
+            _confirmDeposit(depositId);
+        }
+    }
+    
+    /**
+     * @dev Confirm a pending deposit
+     */
+    function confirmDeposit(
+        bytes32 depositId
+    ) external onlyRole(DEPOSIT_MANAGER_ROLE) {
+        _confirmDeposit(depositId);
+    }
+    
+    /**
+     * @dev Request a withdrawal
+     */
+    function requestWithdrawal(
+        address token,
+        uint256 amount
+    ) external nonReentrant whenNotPaused returns (bytes32 withdrawalId) {
+        require(supportedTokens[token], "DepositManager: token not supported");
+        require(amount > 0, "DepositManager: invalid amount");
+        
+        TokenConfig storage config = tokenConfigs[token];
+        require(config.isSupported, "DepositManager: token not active");
+        require(amount >= config.minWithdrawalAmount, "DepositManager: amount below minimum");
+        require(amount <= config.maxWithdrawalAmount, "DepositManager: amount above maximum");
+        require(tokenBalances[token] >= amount, "DepositManager: insufficient balance");
+        
+        // Check daily withdrawal limits
+        UserStats storage stats = userStats[msg.sender][token];
+        _updateDailyWithdrawalTracking(stats);
+        
+        require(
+            config.dailyWithdrawalLimit == 0 || 
+            stats.dailyWithdrawnAmount + amount <= config.dailyWithdrawalLimit,
+            "DepositManager: daily withdrawal limit exceeded"
         );
         
-        // Calculate LP tokens to mint
-        uint256 lpTokensToMint = _calculateLPTokens(liquidity, params.token0, params.token1);
-        
-        // Mint LP tokens
-        uint256 underlyingValue = actualAmount0 + actualAmount1; // Simplified calculation
-        lpToken.mint(params.recipient, lpTokensToMint, underlyingValue);
-        
-        // Update user deposits
-        userDeposits[params.recipient][params.token0] += actualAmount0;
-        userDeposits[params.recipient][params.token1] += actualAmount1;
-        positionOwners[tokenId] = params.recipient;
-        
-        // Refund excess tokens
-        _refundExcess(
-            params.token0,
-            params.token1,
-            netAmount0 - actualAmount0,
-            netAmount1 - actualAmount1,
-            params.recipient
+        // Calculate fee and unlock timestamp
+        uint256 fee = (amount * config.withdrawalFee) / BASIS_POINTS;
+        uint256 netAmount = amount - fee;
+        uint256 unlockTimestamp = block.timestamp + (
+            emergencyWithdrawalEnabled ? 0 : config.withdrawalDelay
         );
         
-        result = DepositResult({
-            tokenId: tokenId,
-            nftTokenId: nftTokenId,
-            liquidity: liquidity,
-            amount0: actualAmount0,
-            amount1: actualAmount1,
-            lpTokens: lpTokensToMint
+        // Generate withdrawal ID
+        withdrawalCounter++;
+        withdrawalId = keccak256(abi.encodePacked(
+            msg.sender,
+            token,
+            amount,
+            block.timestamp,
+            withdrawalCounter
+        ));
+        
+        // Store withdrawal info
+        withdrawals[withdrawalId] = WithdrawalInfo({
+            user: msg.sender,
+            token: token,
+            amount: amount,
+            fee: fee,
+            netAmount: netAmount,
+            requestTimestamp: block.timestamp,
+            processTimestamp: 0,
+            unlockTimestamp: unlockTimestamp,
+            status: WithdrawalStatus.PENDING,
+            txHash: bytes32(0)
         });
         
-        emit Deposit(
-            params.recipient,
-            params.token0,
-            params.token1,
-            actualAmount0,
-            actualAmount1,
-            liquidity,
-            tokenId,
-            nftTokenId
+        // Update stats
+        stats.pendingWithdrawals = stats.pendingWithdrawals + amount;
+        stats.lastWithdrawalTimestamp = block.timestamp;
+        
+        emit WithdrawalRequested(withdrawalId, msg.sender, token, amount, unlockTimestamp);
+    }
+    
+    /**
+     * @dev Process a withdrawal
+     */
+    function processWithdrawal(
+        bytes32 withdrawalId
+    ) external nonReentrant whenNotPaused {
+        WithdrawalInfo storage withdrawal = withdrawals[withdrawalId];
+        require(withdrawal.user != address(0), "DepositManager: withdrawal not found");
+        require(
+            withdrawal.user == msg.sender || hasRole(WITHDRAWAL_MANAGER_ROLE, msg.sender),
+            "DepositManager: unauthorized"
+        );
+        require(
+            withdrawal.status == WithdrawalStatus.PENDING,
+            "DepositManager: invalid status"
+        );
+        require(
+            block.timestamp >= withdrawal.unlockTimestamp,
+            "DepositManager: withdrawal locked"
+        );
+        
+        // Check if sufficient balance
+        require(
+            tokenBalances[withdrawal.token] >= withdrawal.amount,
+            "DepositManager: insufficient contract balance"
+        );
+        
+        // Update status
+        withdrawal.status = WithdrawalStatus.PROCESSING;
+        withdrawal.processTimestamp = block.timestamp;
+        
+        // Transfer tokens
+        IERC20(withdrawal.token).safeTransfer(withdrawal.user, withdrawal.netAmount);
+        
+        // Update balances and stats
+        tokenBalances[withdrawal.token] = tokenBalances[withdrawal.token] - withdrawal.amount;
+        if (withdrawal.fee > 0) {
+            collectedFees[withdrawal.token] = collectedFees[withdrawal.token] + withdrawal.fee;
+        }
+        
+        UserStats storage stats = userStats[withdrawal.user][withdrawal.token];
+        stats.totalWithdrawn = stats.totalWithdrawn + withdrawal.netAmount;
+        stats.pendingWithdrawals = stats.pendingWithdrawals - withdrawal.amount;
+        stats.dailyWithdrawnAmount = stats.dailyWithdrawnAmount + withdrawal.amount;
+        
+        // Mark as completed
+        withdrawal.status = WithdrawalStatus.COMPLETED;
+        
+        emit WithdrawalProcessed(
+            withdrawalId,
+            withdrawal.user,
+            withdrawal.token,
+            withdrawal.netAmount
         );
     }
     
-    function _calculateOptimalDeposit(DepositParams calldata params)
-        internal
-        returns (uint256 amount0, uint256 amount1, int24 tickLower, int24 tickUpper)
-    {
-        if (params.useOptimalRange) {
-            // Calculate optimal range
-            address pool = _getPool(params.token0, params.token1, params.fee);
-            uint256 currentPrice = _getCurrentPrice(pool);
-            (tickLower, tickUpper) = rangeCalculator.selectTicks(
-                currentPrice,
-                pool,
-                _getTickSpacing(params.fee)
-            );
+    /**
+     * @dev Emergency withdrawal (admin only)
+     */
+    function emergencyWithdraw(
+        address user,
+        address token,
+        uint256 amount
+    ) external onlyRole(ADMIN_ROLE) nonReentrant {
+        require(emergencyWithdrawalEnabled, "DepositManager: emergency withdrawals disabled");
+        require(tokenBalances[token] >= amount, "DepositManager: insufficient balance");
+        
+        IERC20(token).safeTransfer(user, amount);
+        tokenBalances[token] = tokenBalances[token] - amount;
+        
+        emit EmergencyWithdrawal(user, token, amount);
+    }
+    
+    /**
+     * @dev Set token configuration
+     */
+    function setTokenConfig(
+        address token,
+        uint256 minDepositAmount,
+        uint256 maxDepositAmount,
+        uint256 minWithdrawalAmount,
+        uint256 maxWithdrawalAmount,
+        uint256 depositFee,
+        uint256 withdrawalFee,
+        uint256 withdrawalDelay,
+        uint256 dailyWithdrawalLimit,
+        bool requiresApproval,
+        bool isSupported
+    ) external onlyRole(ADMIN_ROLE) {
+        require(token != address(0), "DepositManager: invalid token");
+        require(depositFee <= MAX_DEPOSIT_FEE, "DepositManager: deposit fee too high");
+        require(withdrawalFee <= MAX_WITHDRAWAL_FEE, "DepositManager: withdrawal fee too high");
+        require(maxDepositAmount >= minDepositAmount, "DepositManager: invalid deposit range");
+        require(maxWithdrawalAmount >= minWithdrawalAmount, "DepositManager: invalid withdrawal range");
+        
+        tokenConfigs[token] = TokenConfig({
+            isSupported: isSupported,
+            minDepositAmount: minDepositAmount,
+            maxDepositAmount: maxDepositAmount,
+            minWithdrawalAmount: minWithdrawalAmount,
+            maxWithdrawalAmount: maxWithdrawalAmount,
+            depositFee: depositFee,
+            withdrawalFee: withdrawalFee,
+            withdrawalDelay: withdrawalDelay,
+            dailyWithdrawalLimit: dailyWithdrawalLimit,
+            requiresApproval: requiresApproval
+        });
+        
+        supportedTokens[token] = isSupported;
+        
+        emit TokenConfigUpdated(
+            token,
+            minDepositAmount,
+            maxDepositAmount,
+            depositFee,
+            withdrawalFee
+        );
+    }
+    
+    /**
+     * @dev Collect fees
+     */
+    function collectFees(
+        address token
+    ) external onlyRole(ADMIN_ROLE) nonReentrant {
+        uint256 feeAmount = collectedFees[token];
+        require(feeAmount > 0, "DepositManager: no fees to collect");
+        
+        collectedFees[token] = 0;
+        IERC20(token).safeTransfer(feeCollector, feeAmount);
+        
+        emit FeeCollected(token, feeAmount, feeCollector);
+    }
+    
+    /**
+     * @dev Get user deposit/withdrawal stats
+     */
+    function getUserStats(
+        address user,
+        address token
+    ) external view returns (
+        uint256 totalDeposited,
+        uint256 totalWithdrawn,
+        uint256 pendingWithdrawals,
+        uint256 availableForWithdrawal,
+        uint256 dailyWithdrawnAmount,
+        uint256 dailyWithdrawalLimit
+    ) {
+        UserStats storage stats = userStats[user][token];
+        TokenConfig storage config = tokenConfigs[token];
+        
+        totalDeposited = stats.totalDeposited;
+        totalWithdrawn = stats.totalWithdrawn;
+        pendingWithdrawals = stats.pendingWithdrawals;
+        availableForWithdrawal = totalDeposited - totalWithdrawn - pendingWithdrawals;
+        
+        // Calculate current daily withdrawn amount
+        if (block.timestamp >= stats.lastDailyResetTimestamp + 1 days) {
+            dailyWithdrawnAmount = 0;
         } else {
-            tickLower = params.tickLower;
-            tickUpper = params.tickUpper;
+            dailyWithdrawnAmount = stats.dailyWithdrawnAmount;
         }
         
-        // Calculate optimal amounts
-        (amount0, amount1) = ratioCalculator.computeOptimalAmounts(
-            params.amount0Desired,
-            params.amount1Desired,
-            1000000, // reserveA placeholder
-            1000000  // reserveB placeholder
+        dailyWithdrawalLimit = config.dailyWithdrawalLimit;
+    }
+    
+    /**
+     * @dev Get deposit information
+     */
+    function getDepositInfo(
+        bytes32 depositId
+    ) external view returns (
+        address user,
+        address token,
+        uint256 amount,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 timestamp,
+        DepositStatus status
+    ) {
+        DepositInfo storage depositInfo = deposits[depositId];
+        return (
+            depositInfo.user,
+            depositInfo.token,
+            depositInfo.amount,
+            depositInfo.fee,
+            depositInfo.netAmount,
+            depositInfo.timestamp,
+            depositInfo.status
         );
     }
     
-    function _deductFees(address token0, address token1, uint256 amount0, uint256 amount1)
-        internal
-        returns (uint256 netAmount0, uint256 netAmount1)
-    {
-        uint256 fee0 = (amount0 * depositFee) / 10000;
-        uint256 fee1 = (amount1 * depositFee) / 10000;
+    /**
+     * @dev Get withdrawal information
+     */
+    function getWithdrawalInfo(
+        bytes32 withdrawalId
+    ) external view returns (
+        address user,
+        address token,
+        uint256 amount,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 unlockTimestamp,
+        WithdrawalStatus status
+    ) {
+        WithdrawalInfo storage withdrawal = withdrawals[withdrawalId];
+        return (
+            withdrawal.user,
+            withdrawal.token,
+            withdrawal.amount,
+            withdrawal.fee,
+            withdrawal.netAmount,
+            withdrawal.unlockTimestamp,
+            withdrawal.status
+        );
+    }
+    
+    /**
+     * @dev Internal function to confirm deposit
+     */
+    function _confirmDeposit(bytes32 depositId) internal {
+        DepositInfo storage depositInfo = deposits[depositId];
+        require(depositInfo.user != address(0), "DepositManager: deposit not found");
+        require(depositInfo.status == DepositStatus.PENDING, "DepositManager: invalid status");
         
-        netAmount0 = amount0 - fee0;
-        netAmount1 = amount1 - fee1;
+        depositInfo.status = DepositStatus.CONFIRMED;
         
-        // Transfer fees to fee recipient
-        if (fee0 > 0) {
-            IERC20(token0).safeTransfer(feeRecipient, fee0);
-        }
-        if (fee1 > 0) {
-            IERC20(token1).safeTransfer(feeRecipient, fee1);
-        }
+        emit DepositConfirmed(
+            depositId,
+            depositInfo.user,
+            depositInfo.token,
+            depositInfo.netAmount
+        );
     }
     
-    function _calculateLPTokens(uint128 liquidity, address /* _token0 */, address /* _token1 */)
-        internal
-        pure
-        returns (uint256)
-    {
-        // Simple calculation based on liquidity
-        // In production, this should consider token prices and pool ratios
-        return uint256(liquidity);
-    }
-    
-    function _refundExcess(
-        address token0,
-        address token1,
-        uint256 excess0,
-        uint256 excess1,
-        address recipient
-    ) internal {
-        if (excess0 > 0) {
-            IERC20(token0).safeTransfer(recipient, excess0);
-        }
-        if (excess1 > 0) {
-            IERC20(token1).safeTransfer(recipient, excess1);
+    /**
+     * @dev Update daily withdrawal tracking
+     */
+    function _updateDailyWithdrawalTracking(UserStats storage stats) internal {
+        if (block.timestamp >= stats.lastDailyResetTimestamp + 1 days) {
+            stats.dailyWithdrawnAmount = 0;
+            stats.lastDailyResetTimestamp = block.timestamp;
         }
     }
     
-    function getUserPositions(address user) external view returns (uint256[] memory) {
-        return positionNFT.getUserPositions(user);
+    /**
+     * @dev Set global limits
+     */
+    function setGlobalLimits(
+        uint256 _globalDepositLimit,
+        uint256 _globalWithdrawalLimit
+    ) external onlyRole(ADMIN_ROLE) {
+        globalDepositLimit = _globalDepositLimit;
+        globalWithdrawalLimit = _globalWithdrawalLimit;
     }
     
-    function getPositionDetails(uint256 tokenId) external view returns (PositionNFT.PositionData memory) {
-        return positionNFT.getPosition(tokenId);
+    /**
+     * @dev Set emergency withdrawal status
+     */
+    function setEmergencyWithdrawalEnabled(
+        bool enabled
+    ) external onlyRole(ADMIN_ROLE) {
+        emergencyWithdrawalEnabled = enabled;
     }
     
-    function setDepositFee(uint256 _fee) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_fee <= MAX_FEE, "Fee too high");
-        uint256 oldFee = depositFee;
-        depositFee = _fee;
-        emit DepositFeeUpdated(oldFee, _fee);
+    /**
+     * @dev Set fee collector address
+     */
+    function setFeeCollector(address _feeCollector) external onlyRole(ADMIN_ROLE) {
+        require(_feeCollector != address(0), "DepositManager: invalid fee collector");
+        feeCollector = _feeCollector;
     }
     
-    function setFeeRecipient(address _feeRecipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_feeRecipient != address(0), "Invalid fee recipient");
-        address oldRecipient = feeRecipient;
-        feeRecipient = _feeRecipient;
-        emit FeeRecipientUpdated(oldRecipient, _feeRecipient);
+    /**
+     * @dev Set authorized caller status
+     */
+    function setAuthorizedCaller(address caller, bool authorized) external onlyRole(ADMIN_ROLE) {
+        authorizedCallers[caller] = authorized;
     }
     
+    /**
+     * @dev Pause the contract
+     */
     function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
     
+    /**
+     * @dev Unpause the contract
+     */
     function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
-    }
-    
-    function emergencyWithdraw(address token, uint256 amount) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
-    {
-        IERC20(token).safeTransfer(msg.sender, amount);
-    }
-    
-    function _getPool(address token0, address token1, uint24 fee) internal pure returns (address) {
-        // Simple pool address calculation - in production use Uniswap factory
-        return address(uint160(uint256(keccak256(abi.encodePacked(token0, token1, fee)))));
-    }
-    
-    function _getCurrentPrice(address /* _pool */) internal pure returns (uint256) {
-        // Placeholder - in production get from Uniswap pool
-        return 1e18; // 1:1 price
-    }
-    
-    function _getTickSpacing(uint24 fee) internal pure returns (int24) {
-        if (fee == 100) return 1;
-        if (fee == 500) return 10;
-        if (fee == 3000) return 60;
-        if (fee == 10000) return 200;
-        return 60; // Default
     }
 }

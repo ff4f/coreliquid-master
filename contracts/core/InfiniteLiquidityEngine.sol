@@ -2207,7 +2207,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < poolIds.length; i++) {
             VirtualLiquidityPool storage pool = virtualPools[poolIds[i]];
             if (pool.isActive) {
-                total += pool.virtualReserves;
+                total += pool.virtualReserveA + pool.virtualReserveB;
             }
         }
         
@@ -2269,7 +2269,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < allVirtualPools.length; i++) {
             VirtualLiquidityPool storage pool = virtualPools[allVirtualPools[i]];
             if (pool.isActive) {
-                totalVirtual += pool.virtualReserves;
+                totalVirtual += pool.virtualReserveA + pool.virtualReserveB;
             }
         }
         return totalVirtual;
