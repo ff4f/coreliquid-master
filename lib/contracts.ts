@@ -142,14 +142,22 @@ const DEPOSIT_MANAGER_ABI = [
   'event Withdrawn(address indexed user, address indexed token, uint256 amount)',
 ];
 
-const LENDING_MARKET_ABI = [
-  'function borrow(address token, uint256 amount) returns (bool)',
-  'function repay(address token, uint256 amount) returns (bool)',
-  'function getBorrowBalance(address user, address token) view returns (uint256)',
-  'function getCollateralValue(address user) view returns (uint256)',
-  'function getHealthFactor(address user) view returns (uint256)',
-  'event Borrowed(address indexed user, address indexed token, uint256 amount)',
-  'event Repaid(address indexed user, address indexed token, uint256 amount)',
+const CREDIT_MANAGER_ABI = [
+  'function supply(address asset, uint256 amount) external',
+  'function withdraw(address asset, uint256 amount) external',
+  'function openCreditSale(address asset, uint256 principal, address recipient) external',
+  'function payInstalment(address asset, uint256 principalToRepay, uint256 markupToRepay) external',
+  'function addMarket(address asset, uint256 reserveFactor, bool canBorrow, bool canSupply) external',
+  'function markets(address) view returns (tuple(address asset, uint256 totalSupply, uint256 totalBorrowPrincipal, uint256 utilisationRate, uint256 reserveFactor, uint256 markupIndex, bool isActive, bool canBorrow, bool canSupply))',
+  'function userAccounts(address, address) view returns (tuple(uint256 supplied, uint256 borrowedPrincipal, uint256 totalMarkup, uint256 repaidPrincipal, uint256 repaidMarkup, bool isCollateralEnabled))',
+  'function isMarketListed(address) view returns (bool)',
+  'function allMarkets(uint256) view returns (address)',
+  'event Supplied(address indexed user, address indexed asset, uint256 amount)',
+  'event Withdrawn(address indexed user, address indexed asset, uint256 amount)',
+  'event CreditOpened(address indexed user, address indexed asset, uint256 principal, uint256 markup)',
+  'event InstalmentPaid(address indexed user, address indexed asset, uint256 principalPaid, uint256 markupPaid)',
+  'event MarketAdded(address indexed asset)',
+  'event MarketUpdated(address indexed asset)',
 ];
 
 
@@ -230,9 +238,9 @@ export class CoreFluidXContracts {
       this.signer
     );
 
-    this.contracts.lendingMarket = new Contract(
-      CONTRACT_ADDRESSES.LENDING_MARKET,
-      LENDING_MARKET_ABI,
+    this.contracts.creditManager = new Contract(
+      CONTRACT_ADDRESSES.CREDIT_MANAGER,
+      CREDIT_MANAGER_ABI,
       this.signer
     );
 
@@ -435,25 +443,54 @@ export class CoreFluidXContracts {
     return ethers.formatEther(deposit);
   }
 
-  // Lending Market operations
-  async borrowFromMarket(token: string, amount: string): Promise<any> {
+  // Credit Manager operations
+  async supplyToMarket(asset: string, amount: string): Promise<any> {
     const amountWei = ethers.parseEther(amount);
-    return await this.contracts.lendingMarket.borrow(token, amountWei);
+    return await this.contracts.creditManager.supply(asset, amountWei);
   }
 
-  async repayToMarket(token: string, amount: string): Promise<any> {
+  async withdrawFromMarket(asset: string, amount: string): Promise<any> {
     const amountWei = ethers.parseEther(amount);
-    return await this.contracts.lendingMarket.repay(token, amountWei);
+    return await this.contracts.creditManager.withdraw(asset, amountWei);
   }
 
-  async getBorrowBalance(user: string, token: string): Promise<string> {
-    const balance = await this.contracts.lendingMarket.getBorrowBalance(user, token);
-    return ethers.formatEther(balance);
+  async openCreditSale(asset: string, principal: string, recipient?: string): Promise<any> {
+    const principalWei = ethers.parseEther(principal);
+    const recipientAddr = recipient || ethers.ZeroAddress;
+    return await this.contracts.creditManager.openCreditSale(asset, principalWei, recipientAddr);
   }
 
-  async getHealthFactor(user: string): Promise<string> {
-    const factor = await this.contracts.lendingMarket.getHealthFactor(user);
-    return ethers.formatEther(factor);
+  async payInstalment(asset: string, principalAmount: string, markupAmount: string): Promise<any> {
+    const principalWei = ethers.parseEther(principalAmount);
+    const markupWei = ethers.parseEther(markupAmount);
+    return await this.contracts.creditManager.payInstalment(asset, principalWei, markupWei);
+  }
+
+  async getUserCreditAccount(user: string, asset: string): Promise<any> {
+    const account = await this.contracts.creditManager.userAccounts(user, asset);
+    return {
+      supplied: ethers.formatEther(account.supplied),
+      borrowedPrincipal: ethers.formatEther(account.borrowedPrincipal),
+      totalMarkup: ethers.formatEther(account.totalMarkup),
+      repaidPrincipal: ethers.formatEther(account.repaidPrincipal),
+      repaidMarkup: ethers.formatEther(account.repaidMarkup),
+      isCollateralEnabled: account.isCollateralEnabled
+    };
+  }
+
+  async getMarketInfo(asset: string): Promise<any> {
+    const market = await this.contracts.creditManager.markets(asset);
+    return {
+      asset: market.asset,
+      totalSupply: ethers.formatEther(market.totalSupply),
+      totalBorrowPrincipal: ethers.formatEther(market.totalBorrowPrincipal),
+      utilisationRate: ethers.formatEther(market.utilisationRate),
+      reserveFactor: ethers.formatEther(market.reserveFactor),
+      markupIndex: ethers.formatEther(market.markupIndex),
+      isActive: market.isActive,
+      canBorrow: market.canBorrow,
+      canSupply: market.canSupply
+    };
   }
 
   // APR Metrics - compatibility method for use-corefluidx hook
@@ -787,7 +824,7 @@ export {
   STCORE_TOKEN_ABI,
   REVENUE_MODEL_ABI,
   DEPOSIT_MANAGER_ABI,
-  LENDING_MARKET_ABI,
+  CREDIT_MANAGER_ABI,
   SIMPLE_TULL_ABI,
   OPTIMIZED_TULL_ABI,
   RISK_ENGINE_ABI,

@@ -19,10 +19,10 @@ const menuItems = [
     color: "green",
   },
   {
-    title: "BORROW",
+    title: "CREDIT SALE",
     icon: TrendingDown,
-    href: "/borrow",
-    color: "red",
+    href: "/credit-sale",
+    color: "cyan",
   },
   {
     title: "SWAP",

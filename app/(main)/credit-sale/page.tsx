@@ -14,13 +14,13 @@ import { usePortfolio } from "@/contexts/portfolio-context"
 import { useToast } from "@/hooks/use-toast"
 import { tokens, getTokenData, formatCurrency } from "@/lib/token-data"
 
-export default function BorrowPage() {
+export default function CreditSalePage() {
   const { state, dispatch } = usePortfolio()
   const { toast } = useToast()
   const [collateralToken, setCollateralToken] = useState("")
   const [collateralAmount, setCollateralAmount] = useState("")
-  const [borrowToken, setBorrowToken] = useState("")
-  const [borrowAmount, setBorrowAmount] = useState("")
+  const [creditToken, setCreditToken] = useState("")
+  const [creditAmount, setCreditAmount] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
 
   // Get available tokens for collateral (only tokens user has deposits for)
@@ -39,45 +39,48 @@ export default function BorrowPage() {
       price: data.price,
     }))
 
-  // All tokens available for borrowing
-  const borrowableTokens = Object.entries(tokens).map(([symbol, data]) => ({
+  // All tokens available for credit sale
+  const creditTokens = Object.entries(tokens).map(([symbol, data]) => ({
     symbol,
     name: data.name,
     icon: data.icon,
     price: data.price,
-    apy: 5.2 + Math.random() * 3, // Mock APY
+    markup: 2.5 + Math.random() * 2, // Mock fixed markup percentage
   }))
 
-  const calculateMaxBorrow = () => {
+  const calculateMaxCredit = () => {
     if (!collateralToken || !collateralAmount) return 0
     const collateralValue = Number.parseFloat(collateralAmount) * getTokenData(collateralToken).price
     return collateralValue * 0.8 // 80% LTV
   }
 
   const calculateHealthFactor = () => {
-    if (!collateralAmount || !borrowAmount || !collateralToken || !borrowToken) return 0
+    if (!collateralAmount || !creditAmount || !collateralToken || !creditToken) return 0
     const collateralValue = Number.parseFloat(collateralAmount) * getTokenData(collateralToken).price
-    const borrowValue = Number.parseFloat(borrowAmount) * getTokenData(borrowToken).price
-    return borrowValue > 0 ? (collateralValue * 0.8) / borrowValue : 0
+    const creditValue = Number.parseFloat(creditAmount) * getTokenData(creditToken).price
+    const markup = creditTokens.find(t => t.symbol === creditToken)?.markup || 2.5
+    const totalOwed = creditValue * (1 + markup / 100) // Principal + fixed markup
+    return totalOwed > 0 ? (collateralValue * 0.8) / totalOwed : 0
   }
 
-  const maxBorrowUSD = calculateMaxBorrow()
+  const maxCreditUSD = calculateMaxCredit()
   const healthFactor = calculateHealthFactor()
   const selectedCollateralToken = availableCollateralTokens.find((t) => t.symbol === collateralToken)
+  const selectedCreditToken = creditTokens.find((t) => t.symbol === creditToken)
 
-  const handleBorrow = async () => {
+  const handleCreditSale = async () => {
     if (!state.isWalletConnected) {
       toast({
         title: "Wallet Not Connected",
-        description: "Please connect your wallet to borrow assets.",
+        description: "Please connect your wallet to open a credit sale.",
         variant: "destructive",
       })
       return
     }
 
-    if (!collateralToken || !collateralAmount || !borrowToken || !borrowAmount) {
+    if (!collateralToken || !collateralAmount || !creditToken || !creditAmount) {
       toast({
-        title: "Invalid Borrow",
+        title: "Invalid Credit Sale",
         description: "Please fill in all required fields.",
         variant: "destructive",
       })
@@ -85,10 +88,10 @@ export default function BorrowPage() {
     }
 
     const collateralAmountNum = Number.parseFloat(collateralAmount)
-    const borrowAmountNum = Number.parseFloat(borrowAmount)
+    const creditAmountNum = Number.parseFloat(creditAmount)
     const availableForCollateral = selectedCollateralToken?.availableBalance || 0
 
-    if (collateralAmountNum <= 0 || borrowAmountNum <= 0) {
+    if (collateralAmountNum <= 0 || creditAmountNum <= 0) {
       toast({
         title: "Invalid Amount",
         description: "Please enter valid amounts.",
@@ -106,11 +109,11 @@ export default function BorrowPage() {
       return
     }
 
-    const borrowValueUSD = borrowAmountNum * getTokenData(borrowToken).price
-    if (borrowValueUSD > maxBorrowUSD) {
+    const creditValueUSD = creditAmountNum * getTokenData(creditToken).price
+    if (creditValueUSD > maxCreditUSD) {
       toast({
-        title: "Borrow Amount Too High",
-        description: `Maximum borrow amount is ${formatCurrency(maxBorrowUSD)} based on your collateral.`,
+        title: "Credit Amount Too High",
+        description: `Maximum credit amount is ${formatCurrency(maxCreditUSD)} based on your collateral.`,
         variant: "destructive",
       })
       return
@@ -119,7 +122,7 @@ export default function BorrowPage() {
     if (healthFactor < 1.2) {
       toast({
         title: "Health Factor Too Low",
-        description: "Your health factor would be too low. Reduce borrow amount or increase collateral.",
+        description: "Your health factor would be too low. Reduce credit amount or increase collateral.",
         variant: "destructive",
       })
       return
@@ -132,9 +135,11 @@ export default function BorrowPage() {
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
       const collateralTokenData = getTokenData(collateralToken)
-      const borrowTokenData = getTokenData(borrowToken)
+      const creditTokenData = getTokenData(creditToken)
       const collateralValueUSD = collateralAmountNum * collateralTokenData.price
-      const borrowValueUSD = borrowAmountNum * borrowTokenData.price
+      const creditValueUSD = creditAmountNum * creditTokenData.price
+      const markup = selectedCreditToken?.markup || 2.5
+      const totalOwedUSD = creditValueUSD * (1 + markup / 100)
 
       // First, update existing deposit to mark as collateral or create new collateral position
       const existingDeposit = state.positions.find(
@@ -195,32 +200,32 @@ export default function BorrowPage() {
         dispatch({ type: "ADD_POSITION", payload: collateralPosition })
       }
 
-      // Add borrow position
-      const borrowPosition = {
-        id: `borrow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: "borrow" as const,
-        token: borrowToken,
-        amount: borrowAmountNum,
-        valueUSD: borrowValueUSD,
-        apy: borrowableTokens.find((t) => t.symbol === borrowToken)?.apy || 5.2,
+      // Add credit sale position
+      const creditPosition = {
+        id: `credit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: "borrow" as const, // Keep as 'borrow' for compatibility with existing state
+        token: creditToken,
+        amount: creditAmountNum,
+        valueUSD: totalOwedUSD, // Total amount owed including markup
+        apy: markup, // Store markup as 'apy' for compatibility
         timestamp: Date.now(),
       }
 
-      dispatch({ type: "ADD_POSITION", payload: borrowPosition })
+      dispatch({ type: "ADD_POSITION", payload: creditPosition })
 
       toast({
-        title: "Borrow Successful",
-        description: `Successfully borrowed ${borrowAmount} ${borrowToken} using ${collateralAmount} ${collateralToken} as collateral.`,
+        title: "Credit Sale Successful",
+        description: `Successfully opened credit sale for ${creditAmount} ${creditToken} using ${collateralAmount} ${collateralToken} as collateral. Fixed markup: ${markup.toFixed(1)}%`,
         variant: "default",
       })
 
       // Reset form
       setCollateralAmount("")
-      setBorrowAmount("")
+      setCreditAmount("")
     } catch (error) {
       toast({
-        title: "Borrow Failed",
-        description: "Failed to process borrow. Please try again.",
+        title: "Credit Sale Failed",
+        description: "Failed to process credit sale. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -231,8 +236,8 @@ export default function BorrowPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-white mb-2 font-mono">BORROW</h1>
-        <p className="text-gray-400 font-mono">Leverage your assets with overcollateralized loans</p>
+        <h1 className="text-3xl font-bold text-white mb-2 font-mono">CREDIT SALE</h1>
+        <p className="text-gray-400 font-mono">Access assets with fixed-markup credit backed by collateral</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -241,21 +246,21 @@ export default function BorrowPage() {
           <CardHeader>
             <CardTitle className="text-xl font-semibold text-white flex items-center font-mono">
               <TrendingUp className="w-5 h-5 mr-2 text-green-400" />
-              Create Loan
+              Open Credit Sale
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <Tabs defaultValue="borrow" className="w-full">
+            <Tabs defaultValue="credit" className="w-full">
               <TabsList className="grid w-full grid-cols-2 bg-[#2A2A2A]">
-                <TabsTrigger value="borrow" className="font-mono">
-                  BORROW
+                <TabsTrigger value="credit" className="font-mono">
+                  CREDIT SALE
                 </TabsTrigger>
                 <TabsTrigger value="repay" className="font-mono">
-                  REPAY
+                  PAY INSTALMENT
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="borrow" className="space-y-4">
+              <TabsContent value="credit" className="space-y-4">
                 {/* Collateral Section */}
                 <div className="space-y-3">
                   <Label className="text-gray-400 font-mono">Collateral</Label>
@@ -315,16 +320,16 @@ export default function BorrowPage() {
                   )}
                 </div>
 
-                {/* Borrow Section */}
+                {/* Credit Sale Section */}
                 <div className="space-y-3">
-                  <Label className="text-gray-400 font-mono">Borrow</Label>
+                  <Label className="text-gray-400 font-mono">Credit Asset</Label>
                   <div className="flex space-x-2">
-                    <Select value={borrowToken} onValueChange={setBorrowToken}>
+                    <Select value={creditToken} onValueChange={setCreditToken}>
                       <SelectTrigger className="w-32 bg-[#2A2A2A] border-[#3A3A3A] text-white font-mono">
                         <SelectValue placeholder="Token" />
                       </SelectTrigger>
                       <SelectContent className="bg-[#2A2A2A] border-[#3A3A3A]">
-                        {borrowableTokens.map((token) => (
+                        {creditTokens.map((token) => (
                           <SelectItem
                             key={token.symbol}
                             value={token.symbol}
@@ -335,7 +340,7 @@ export default function BorrowPage() {
                                 <span className="text-lg">{token.icon}</span>
                                 <span>{token.symbol}</span>
                               </div>
-                              <span className="text-green-400 text-xs">{token.apy.toFixed(1)}% APY</span>
+                              <span className="text-cyan-400 text-xs">{token.markup.toFixed(1)}% Markup</span>
                             </div>
                           </SelectItem>
                         ))}
@@ -344,21 +349,21 @@ export default function BorrowPage() {
                     <Input
                       type="number"
                       placeholder="0.00"
-                      value={borrowAmount}
-                      onChange={(e) => setBorrowAmount(e.target.value)}
+                      value={creditAmount}
+                      onChange={(e) => setCreditAmount(e.target.value)}
                       className="flex-1 bg-[#2A2A2A] border-[#3A3A3A] text-white font-mono"
                     />
                   </div>
-                  {borrowToken && maxBorrowUSD > 0 && (
+                  {creditToken && maxCreditUSD > 0 && (
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-400 font-mono">Max borrow: {formatCurrency(maxBorrowUSD)}</p>
+                      <p className="text-sm text-gray-400 font-mono">Max credit: {formatCurrency(maxCreditUSD)}</p>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          if (borrowToken) {
-                            const maxTokens = maxBorrowUSD / getTokenData(borrowToken).price
-                            setBorrowAmount((maxTokens * 0.9).toFixed(6)) // 90% of max for safety
+                          if (creditToken) {
+                            const maxTokens = maxCreditUSD / getTokenData(creditToken).price
+                            setCreditAmount((maxTokens * 0.9).toFixed(6)) // 90% of max for safety
                           }
                         }}
                         className="text-xs text-cyan-400 hover:text-cyan-300 h-auto p-1 font-mono"
@@ -370,12 +375,14 @@ export default function BorrowPage() {
                 </div>
 
                 {/* Health Factor Preview */}
-                {collateralAmount && borrowAmount && collateralToken && borrowToken && (
+                {collateralAmount && creditAmount && collateralToken && creditToken && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-gray-400 font-mono">Health Factor</Label>
                       <span
-                        className={`font-mono ${healthFactor >= 1.5 ? "text-green-400" : healthFactor >= 1.2 ? "text-yellow-400" : "text-red-400"}`}
+                        className={`font-mono ${
+                          healthFactor >= 1.5 ? "text-green-400" : healthFactor >= 1.2 ? "text-yellow-400" : "text-red-400"
+                        }`}
                       >
                         {healthFactor.toFixed(2)}
                       </span>
@@ -388,6 +395,11 @@ export default function BorrowPage() {
                           ? "Moderate Risk"
                           : "High Risk - Liquidation possible"}
                     </p>
+                    {selectedCreditToken && (
+                      <p className="text-xs text-cyan-400 font-mono">
+                        Fixed markup: {selectedCreditToken.markup.toFixed(1)}% (one-time fee)
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -395,25 +407,25 @@ export default function BorrowPage() {
                   className={`w-full font-mono ${
                     !state.isWalletConnected ||
                     !collateralToken ||
-                    !borrowToken ||
+                    !creditToken ||
                     !collateralAmount ||
-                    !borrowAmount ||
+                    !creditAmount ||
                     isProcessing ||
                     healthFactor < 1.2
                       ? "bg-gray-600 cursor-not-allowed"
-                      : "bg-green-600 hover:bg-green-700"
+                      : "bg-cyan-600 hover:bg-cyan-700"
                   } text-white`}
                   disabled={
                     !state.isWalletConnected ||
                     !collateralToken ||
-                    !borrowToken ||
+                    !creditToken ||
                     !collateralAmount ||
-                    !borrowAmount ||
+                    !creditAmount ||
                     isProcessing ||
                     healthFactor < 1.2 ||
                     Number.parseFloat(collateralAmount) > (selectedCollateralToken?.availableBalance || 0)
                   }
-                  onClick={handleBorrow}
+                  onClick={handleCreditSale}
                 >
                   <TrendingUp className="w-4 h-4 mr-2" />
                   {isProcessing
@@ -422,25 +434,25 @@ export default function BorrowPage() {
                       ? "CONNECT_WALLET"
                       : healthFactor < 1.2
                         ? "HEALTH_FACTOR_TOO_LOW"
-                        : "CREATE_LOAN"}
+                        : "OPEN_CREDIT_SALE"}
                 </Button>
               </TabsContent>
 
               <TabsContent value="repay" className="space-y-4">
                 <div className="text-center py-8">
                   <DollarSign className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-400 font-mono">Repay functionality coming soon</p>
-                  <p className="text-gray-500 text-sm font-mono mt-1">Manage your existing loans</p>
+                  <p className="text-gray-400 font-mono">Instalment payment functionality coming soon</p>
+                  <p className="text-gray-500 text-sm font-mono mt-1">Manage your existing credit sales</p>
                 </div>
               </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
 
-        {/* Loan Overview */}
+        {/* Credit Overview */}
         <Card className="bg-[#1E1E1E] border-[#2A2A2A]">
           <CardHeader>
-            <CardTitle className="text-xl font-semibold text-white font-mono text-cyan-400">Loan Overview</CardTitle>
+            <CardTitle className="text-xl font-semibold text-white font-mono text-cyan-400">Credit Overview</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -449,7 +461,7 @@ export default function BorrowPage() {
                 <p className="text-2xl font-bold text-white font-mono">{formatCurrency(state.totalDepositsUSD)}</p>
               </div>
               <div className="space-y-2">
-                <Label className="text-gray-400 font-mono">Total Borrowed</Label>
+                <Label className="text-gray-400 font-mono">Total Credit Owed</Label>
                 <p className="text-2xl font-bold text-white font-mono">{formatCurrency(state.totalBorrowsUSD)}</p>
               </div>
             </div>

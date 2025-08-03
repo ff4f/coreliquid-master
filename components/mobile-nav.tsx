@@ -17,9 +17,9 @@ const menuItems = [
     href: "/deposit",
   },
   {
-    title: "Borrow",
+    title: "Credit Sale",
     icon: TrendingDown,
-    href: "/borrow",
+    href: "/credit-sale",
   },
   {
     title: "Swap",
