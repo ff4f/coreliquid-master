@@ -9,24 +9,12 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 
 
 // Import all major components
-import "../utils/DepositManager.sol";
-import "../rebalancing/AutoRebalanceManager.sol";
-import "../rebalancing/RebalanceFlow.sol";
-import "../lending/BorrowEngine.sol";
 import "../lending/CollateralManager.sol";
-import "../lending/InterestRateModel.sol";
 import "../lending/LiquidationEngine.sol";
 import "../vault/VaultManager.sol";
-import "../vault/VaultStrategyBase.sol";
-import "../vault/YieldAggregator.sol";
-import "../vault/YieldOptimizer.sol";
-import "../vault/YieldStrategy.sol";
-// import "../utils/APRCalculator.sol"; // APRCalculator functionality integrated into core contracts
-import "../utils/APROptimizer.sol";
 
 // Import Core Chain native integrations
 import "./CoreNativeStaking.sol";
-import "../staking/StCOREToken.sol";
 
 /**
  * @title CoreLiquidProtocol
@@ -45,24 +33,12 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     
     // Protocol components
-    DepositManager public depositManager;
-    AutoRebalanceManager public autoRebalanceManager;
-    RebalanceFlow public rebalanceFlow;
-    BorrowEngine public borrowEngine;
     CollateralManager public collateralManager;
-    InterestRateModel public interestRateModel;
     LiquidationEngine public liquidationEngine;
     VaultManager public vaultManager;
-    YieldAggregator public yieldAggregator;
-    YieldOptimizer public yieldOptimizer;
-    YieldStrategy public yieldStrategy;
-    // APRCalculator public aprCalculator; // Functionality integrated into core contracts
-    APROptimizer public aprOptimizer;
     
     // Core Chain native components
     CoreNativeStaking public coreNativeStaking;
-    StCOREToken public stCoreToken;
-    CoreValidatorIntegration public coreValidatorIntegration;
     
     // Protocol state
     struct ProtocolMetrics {
