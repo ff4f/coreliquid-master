@@ -511,8 +511,7 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
 
     function emergencyClaimPayout(
         bytes32 claimId,
-        uint256 amount,
-        string calldata reason
+        uint256 amount
     ) external onlyRole(EMERGENCY_ROLE) {
         require(emergencyMode, "Not in emergency mode");
         require(isClaimActive[claimId], "Claim not active");
@@ -536,8 +535,57 @@ abstract contract Insurance is AccessControl, ReentrancyGuard, Pausable, EIP712,
     }
 
     // View functions
-    function getPolicy(bytes32 policyId) external view returns (IInsurance.Policy memory) {
+    function getInsurancePolicy(bytes32 policyId) external view returns (IInsurance.InsurancePolicy memory) {
         return policies[policyId];
+    }
+
+    // New wrapper to comply with IInsurance interface
+    function getPolicy(bytes32 policyId) external view override returns (IInsurance.Policy memory) {
+        IInsurance.InsurancePolicy storage ip = policies[policyId];
+
+        string[] memory emptyStrArr = new string[](0);
+        bytes32[] memory emptyBytesArr = new bytes32[](0);
+
+        IInsurance.PolicyTerms memory terms = IInsurance.PolicyTerms({
+            coveredRisks: emptyStrArr,
+            exclusions: emptyStrArr,
+            maxClaimAmount: 0,
+            maxClaimsPerPeriod: 0,
+            waitingPeriod: 0,
+            autoRenewal: false,
+            renewalDiscount: 0,
+            conditions: emptyStrArr
+        });
+
+        IInsurance.PolicyMetrics memory metrics = IInsurance.PolicyMetrics({
+            totalPremiumPaid: 0,
+            totalClaimsSubmitted: 0,
+            totalClaimsPaid: 0,
+            lossRatio: 0,
+            profitability: 0,
+            riskScore: 0,
+            lastUpdate: 0
+        });
+
+        IInsurance.Policy memory p = IInsurance.Policy({
+            policyId: ip.policyId,
+            policyholder: ip.policyholder,
+            policyType: ip.policyType,
+            coverageAmount: ip.coverageAmount,
+            premium: ip.premiumAmount,
+            deductible: 0,
+            duration: ip.endTime > ip.startTime ? ip.endTime - ip.startTime : 0,
+            createdAt: ip.createdAt,
+            activatedAt: ip.startTime,
+            expiresAt: ip.endTime,
+            status: ip.status,
+            terms: terms,
+            metrics: metrics,
+            claims: emptyBytesArr,
+            underwriter: address(0)
+        });
+
+        return p;
     }
 
     function getClaim(bytes32 claimId) external view returns (IInsurance.Claim memory) {

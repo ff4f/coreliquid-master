@@ -237,7 +237,7 @@ contract SeamlessIntegrationHub is AccessControl, ReentrancyGuard, Pausable {
         address _crossProtocolBridge,
         address _advancedRebalancer,
         address _idleCapitalManager,
-        address _infiniteLiquidityEngine,
+        address payable _infiniteLiquidityEngine,
         address _borrowEngine,
         address _vaultManager,
         address _oracleRouter
@@ -624,14 +624,14 @@ contract SeamlessIntegrationHub is AccessControl, ReentrancyGuard, Pausable {
         address targetProtocol
     ) internal returns (bool) {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        IERC20(asset).safeApprove(address(unifiedLiquidity), amount);
+        IERC20(asset).forceApprove(address(unifiedLiquidity), amount);
         
-        return unifiedLiquidity.depositUnified(
-            msg.sender,
+        unifiedLiquidity.depositUnified(
             asset,
-            amount,
-            targetProtocol
+            amount
         );
+        
+        return true;
     }
     
     /**
@@ -642,12 +642,12 @@ contract SeamlessIntegrationHub is AccessControl, ReentrancyGuard, Pausable {
         uint256 amount,
         address targetProtocol
     ) internal returns (bool) {
-        return unifiedLiquidity.withdrawUnified(
-            msg.sender,
+        unifiedLiquidity.withdraw(
             asset,
             amount,
-            targetProtocol
+            msg.sender
         );
+        return true;
     }
     
     /**
@@ -677,7 +677,7 @@ contract SeamlessIntegrationHub is AccessControl, ReentrancyGuard, Pausable {
         uint256 amount
     ) internal returns (bool) {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        IERC20(asset).safeApprove(address(borrowEngine), amount);
+        IERC20(asset).forceApprove(address(borrowEngine), amount);
         
         // Implementation would call lending protocol
         return true;
@@ -703,13 +703,14 @@ contract SeamlessIntegrationHub is AccessControl, ReentrancyGuard, Pausable {
         address fromProtocol,
         address toProtocol
     ) internal returns (bool) {
-        return crossProtocolBridge.executeSeamlessTransfer(
+        uint256 requestId = crossProtocolBridge.executeSeamlessTransfer(
             asset,
             amount,
             CrossProtocolBridge.ProtocolType(0), // Placeholder
             CrossProtocolBridge.ProtocolType(1), // Placeholder
             ""
         );
+        return requestId > 0;
     }
     
     /**

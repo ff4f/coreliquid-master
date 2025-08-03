@@ -207,7 +207,6 @@ contract UnifiedLiquidityLayer is AccessControl, ReentrancyGuard, Pausable {
     ) external nonReentrant whenNotPaused {
         require(supportedAssets[asset], "Asset not supported");
         require(amount > 0, "Invalid amount");
-        
         // Transfer tokens from user
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
         
@@ -234,6 +233,44 @@ contract UnifiedLiquidityLayer is AccessControl, ReentrancyGuard, Pausable {
         _updateUnifiedAccounting(msg.sender);
         
         emit LiquidityUnified(msg.sender, asset, amount, block.timestamp);
+    }
+
+    /**
+     * @dev Withdraw assets from unified liquidity layer
+     * @notice Withdraws from available liquidity across all protocols
+     */
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address user
+    ) external nonReentrant whenNotPaused returns (bool) {
+        require(supportedAssets[asset], "Asset not supported");
+        require(amount > 0, "Invalid amount");
+        require(userAssetBalances[user][asset] >= amount, "Insufficient balance");
+        
+        // Update user asset balance
+        userAssetBalances[user][asset] -= amount;
+        
+        // Update unified position
+        UnifiedPosition storage position = userPositions[user];
+        position.totalLiquidity -= amount;
+        
+        // Update asset liquidity
+        AssetLiquidity storage assetLiq = assetLiquidity[asset];
+        assetLiq.totalDeposited -= amount;
+        
+        // Update global tracking
+        totalUnifiedLiquidity -= amount;
+        
+        // Transfer tokens to user
+        IERC20(asset).safeTransfer(user, amount);
+        
+        // Update unified accounting
+        _updateUnifiedAccounting(user);
+        
+        emit LiquidityUnified(user, asset, amount, block.timestamp);
+        
+        return true;
     }
     
     /**
@@ -666,6 +703,32 @@ contract UnifiedLiquidityLayer is AccessControl, ReentrancyGuard, Pausable {
         return amount; // Placeholder
     }
     
+    function allocateToProtocol(
+        address asset,
+        uint256 amount,
+        string calldata protocol
+    ) external returns (bool) {
+        require(supportedAssets[asset], "Asset not supported");
+        require(amount > 0, "Amount must be greater than 0");
+        require(IERC20(asset).balanceOf(address(this)) >= amount, "Insufficient balance");
+        
+        // Allocate based on protocol type
+        if (keccak256(bytes(protocol)) == keccak256(bytes("LENDING"))) {
+            _allocateToLending(asset, amount);
+        } else if (keccak256(bytes(protocol)) == keccak256(bytes("DEX"))) {
+            _allocateToDex(asset, amount);
+        } else if (keccak256(bytes(protocol)) == keccak256(bytes("VAULT"))) {
+            _allocateToVault(asset, amount);
+        } else if (keccak256(bytes(protocol)) == keccak256(bytes("STAKING"))) {
+            _allocateToStaking(asset, amount);
+        } else {
+            revert("Unsupported protocol");
+        }
+        
+        emit ProtocolAllocation(protocol, asset, amount, block.timestamp);
+        return true;
+    }
+    
     function _autoAllocateLiquidity(address asset, uint256 amount) internal {
         // Auto-allocate based on target allocations
         uint256 lendingAmount = (amount * lendingTargetAllocation) / BASIS_POINTS;
@@ -846,5 +909,32 @@ contract UnifiedLiquidityLayer is AccessControl, ReentrancyGuard, Pausable {
         emit LiquidityUtilized(user, token, amount, "cross-protocol-return", block.timestamp);
         
         return true;
+    }
+    
+    /**
+     * @dev Execute flash loan
+     */
+    function executeFlashLoan(
+        address borrower,
+        address asset,
+        uint256 amount,
+        bytes calldata params
+    ) external nonReentrant {
+        require(amount > 0, "Invalid amount");
+        require(IERC20(asset).balanceOf(address(this)) >= amount, "Insufficient liquidity");
+        
+        uint256 fee = (amount * 9) / 10000; // 0.09% fee
+        
+        // Transfer tokens to borrower
+        IERC20(asset).safeTransfer(borrower, amount);
+        
+        // Execute callback
+        (bool success,) = borrower.call(params);
+        require(success, "Flash loan callback failed");
+        
+        // Collect repayment
+        IERC20(asset).safeTransferFrom(borrower, address(this), amount + fee);
+        
+        emit LiquidityUtilized(borrower, asset, amount, "flash-loan", block.timestamp);
     }
 }

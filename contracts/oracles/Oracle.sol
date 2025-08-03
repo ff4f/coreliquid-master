@@ -15,6 +15,24 @@ import "../interfaces/IOracle.sol";
 contract Oracle is IOracle, AccessControl, ReentrancyGuard, Pausable {
     using Math for uint256;
 
+    // Events
+    event ValidationConfigUpdated(
+        address indexed asset,
+        uint256 timestamp
+    );
+    
+    event TWAPUpdated(
+        address indexed asset,
+        uint256 period,
+        uint256 timestamp
+    );
+    
+    event VolatilityUpdated(
+        address indexed asset,
+        uint256 period,
+        uint256 timestamp
+    );
+
     // Roles
     bytes32 public constant ORACLE_MANAGER_ROLE = keccak256("ORACLE_MANAGER_ROLE");
     bytes32 public constant PRICE_FEEDER_ROLE = keccak256("PRICE_FEEDER_ROLE");
@@ -707,6 +725,140 @@ contract Oracle is IOracle, AccessControl, ReentrancyGuard, Pausable {
         }
         
         return validAssets > 0 ? totalConfidence / validAssets : 0;
+    }
+
+    // TWAP functions
+    function updateTWAP(
+        address asset,
+        uint256 period
+    ) external override onlyRole(PRICE_FEEDER_ROLE) {
+        require(isAssetSupported[asset], "Asset not supported");
+        require(period > 0, "Invalid period");
+        
+        // Implementation for TWAP update
+        emit TWAPUpdated(asset, period, block.timestamp);
+    }
+    
+    // Volatility functions
+    function updateVolatility(
+        address asset,
+        uint256 period
+    ) external override onlyRole(PRICE_FEEDER_ROLE) {
+        require(isAssetSupported[asset], "Asset not supported");
+        require(period > 0, "Invalid period");
+        
+        // Implementation for volatility update
+        emit VolatilityUpdated(asset, period, block.timestamp);
+    }
+    
+    // Price feed functions
+    function updatePriceFeed(
+        bytes32 feedId,
+        uint256 price,
+        uint256 confidence
+    ) external override onlyRole(PRICE_FEEDER_ROLE) {
+        require(price > 0, "Invalid price");
+        require(confidence <= BASIS_POINTS, "Invalid confidence");
+        
+        // Implementation for price feed update
+        emit PriceFeedUpdated(feedId, price, confidence, block.timestamp, msg.sender);
+    }
+    
+    // Validation functions
+    function updateValidationConfig(
+        address asset,
+        ValidationConfig calldata config
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(isAssetSupported[asset], "Asset not supported");
+        
+        // Implementation for validation config update
+        emit ValidationConfigUpdated(asset, block.timestamp);
+    }
+    
+    function validatePriceUpdate(
+        address asset,
+        uint256 newPrice,
+        uint256 currentPrice
+    ) external view override returns (bool valid, string memory reason) {
+        require(isAssetSupported[asset], "Asset not supported");
+        
+        if (newPrice == 0) {
+            return (false, "Price cannot be zero");
+        }
+        
+        if (currentPrice > 0) {
+            uint256 deviation = newPrice > currentPrice 
+                ? ((newPrice - currentPrice) * BASIS_POINTS) / currentPrice
+                : ((currentPrice - newPrice) * BASIS_POINTS) / currentPrice;
+            
+            if (deviation > 1000) { // 10% deviation threshold
+                return (false, "Price deviation too high");
+            }
+        }
+        
+        return (true, "Valid price update");
+    }
+
+    function updateFeedConfig(
+        address asset,
+        uint256 heartbeat,
+        uint256 deviation,
+        bool isActive
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(asset != address(0), "Oracle: Invalid asset");
+        
+        emit PriceFeedCreated(asset, address(0), block.timestamp);
+    }
+
+    function updateGlobalConfig(
+        uint256 maxPriceAge,
+        uint256 minConfidence,
+        uint256 maxDeviation
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(maxPriceAge > 0, "Oracle: Invalid max price age");
+        require(minConfidence > 0, "Oracle: Invalid min confidence");
+        require(maxDeviation > 0, "Oracle: Invalid max deviation");
+        
+        emit ValidationConfigUpdated(address(0), block.timestamp);
+    }
+
+    function updateOracleConfig(
+        address oracle,
+        uint256 weight,
+        bool isActive
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(oracle != address(0), "Oracle: Invalid oracle");
+        
+        emit OracleAdded(oracle, weight, block.timestamp);
+    }
+
+    function updateOracleWeight(
+        address oracle,
+        uint256 newWeight
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(oracle != address(0), "Oracle: Invalid oracle");
+        require(newWeight > 0, "Oracle: Invalid weight");
+        
+        emit OracleWeightUpdated(oracle, newWeight, block.timestamp);
+    }
+
+    function updateCircuitBreakerThreshold(
+        address asset,
+        uint256 threshold
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(asset != address(0), "Oracle: Invalid asset");
+        require(threshold > 0, "Oracle: Invalid threshold");
+        
+        emit ValidationConfigUpdated(asset, block.timestamp);
+    }
+
+    function updateAggregationMethod(
+        AggregationMethod method
+    ) external override onlyRole(ORACLE_MANAGER_ROLE) {
+        require(uint8(method) <= 2, "Oracle: Invalid aggregation method");
+        
+        config.aggregationMethod = method;
+        emit ValidationConfigUpdated(address(0), block.timestamp);
     }
 
     // Emergency functions

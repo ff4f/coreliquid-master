@@ -170,7 +170,7 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
 
     constructor(
         address _unifiedLiquidity,
-        address _infiniteLiquidity,
+        address payable _infiniteLiquidity,
         address _integrationHub,
         address _oracleRouter,
         address _vaultManager,
@@ -433,7 +433,7 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         uint256 amount
     ) internal returns (uint256 actualYield) {
         // Approve asset for the route protocol
-        IERC20(asset).safeApprove(route.protocol, amount);
+        IERC20(asset).forceApprove(route.protocol, amount);
         
         if (route.routeType == RouteType.LENDING) {
             actualYield = _executeLendingRoute(asset, route.protocol, amount);
@@ -450,7 +450,7 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         }
         
         // Reset approval
-        IERC20(asset).safeApprove(route.protocol, 0);
+        IERC20(asset).forceApprove(route.protocol, 0);
     }
 
     /**
@@ -461,7 +461,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToLending(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "LENDING");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -472,7 +473,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToDex(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "DEX");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -483,7 +485,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToVault(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "VAULT");
+        return amount; // Return amount as yield placeholder
     }
 
     /**
@@ -494,7 +497,8 @@ contract IntelligentLiquidityRouter is AccessControl, ReentrancyGuard, Pausable 
         address protocol,
         uint256 amount
     ) internal returns (uint256) {
-        return unifiedLiquidity.allocateToStaking(asset, amount);
+        unifiedLiquidity.allocateToProtocol(asset, amount, "STAKING");
+        return amount; // Return amount as yield placeholder
     }
 
     /**

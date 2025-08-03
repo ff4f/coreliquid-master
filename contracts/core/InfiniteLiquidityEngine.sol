@@ -63,6 +63,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         uint256 accessLatency;
         uint256 reliability;
         uint256 lastUpdate;
+        uint256 capacity;
+        uint256 utilization;
         bool isActive;
         bool isEmergencySource;
     }
@@ -122,6 +124,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         uint256 virtualReserveB;
         uint256 amplificationFactor;
         uint256 feeRate;
+        uint256 efficiency;
         uint256 lastUpdate;
         bool isActive;
     }
@@ -145,6 +148,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         address borrower;
         uint256 timestamp;
         bool isActive;
+        bool isRepaid;
     }
     
     struct CrossChainLiquidity {
@@ -165,15 +169,21 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         uint256 reserveAmount;
         uint256 utilizationRate;
         uint256 lastActivation;
+        uint256 emergencyThreshold;
         bool isActive;
     }
     
     struct OptimizationConfig {
+        uint256 targetUtilization;
         uint256 rebalanceThreshold;
         uint256 efficiencyTarget;
         uint256 gasOptimizationLevel;
+        uint256 gasOptimization; // legacy compatibility
         uint256 slippageTolerance;
+        uint256 maxSlippage; // legacy compatibility
         bool autoOptimize;
+        bool autoRebalance; // legacy compatibility
+        uint256 lastUpdate;
     }
     
     // LiquidityMetrics struct for getLiquidityMetrics function
@@ -317,7 +327,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
     event EmergencyLiquidityActivated(
         address indexed asset,
         uint256 emergencyLiquidity,
-        uint256 sourceCount,
+        string reason,
         uint256 timestamp
     );
     
@@ -604,6 +614,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
                 accessLatency: 1, // 1 block
                 reliability: 9500, // 95%
                 lastUpdate: block.timestamp,
+                capacity: lendingLiquidity,
+                utilization: (lendingLiquidity * _getLendingUtilization(asset)) / 10000,
                 isActive: true,
                 isEmergencySource: false
             }));
@@ -623,6 +635,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
                 accessLatency: 2, // 2 blocks
                 reliability: 9000, // 90%
                 lastUpdate: block.timestamp,
+                capacity: vaultLiquidity,
+                utilization: (vaultLiquidity * _getVaultUtilization(asset)) / 10000,
                 isActive: true,
                 isEmergencySource: false
             }));
@@ -642,6 +656,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
                 accessLatency: 1, // 1 block
                 reliability: 9800, // 98%
                 lastUpdate: block.timestamp,
+                capacity: idleLiquidity,
+                utilization: 0,
                 isActive: true,
                 isEmergencySource: false
             }));
@@ -738,6 +754,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
                 accessLatency: 1,
                 reliability: 8000, // 80% for emergency
                 lastUpdate: block.timestamp,
+                capacity: emergencyLending,
+                utilization: 0,
                 isActive: true,
                 isEmergencySource: true
             }));
@@ -757,6 +775,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
                 accessLatency: 3,
                 reliability: 7500, // 75% for emergency
                 lastUpdate: block.timestamp,
+                capacity: emergencyVault,
+                utilization: 0,
                 isActive: true,
                 isEmergencySource: true
             }));
@@ -771,7 +791,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         emit EmergencyLiquidityActivated(
             asset,
             emergencyLiquidity,
-            sourceCount,
+            "Emergency liquidity activated",
             block.timestamp
         );
     }
@@ -1296,6 +1316,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             accessLatency: 1,
             reliability: 9500,
             lastUpdate: block.timestamp,
+            capacity: initialLiquidity,
+            utilization: 0,
             isActive: true,
             isEmergencySource: false
         });
@@ -1323,6 +1345,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             virtualReserveB: 1000000 * PRECISION,
             amplificationFactor: amplificationFactor,
             feeRate: 30, // 0.3%
+            efficiency: 9500, // 95%
             lastUpdate: block.timestamp,
             isActive: true
         });
@@ -1385,7 +1408,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             fee: fee,
             borrower: msg.sender,
             timestamp: block.timestamp,
-            isActive: true
+            isActive: true,
+            isRepaid: false
         });
         
         allFlashLoans.push(flashId);
@@ -1449,6 +1473,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             reserveAmount: reserveAmount,
             utilizationRate: 0,
             lastActivation: block.timestamp,
+            emergencyThreshold: reserveAmount / 2,
             isActive: true
         });
     }
@@ -1661,6 +1686,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             virtualReserveB: 0,
             amplificationFactor: backingRatio,
             feeRate: 30, // 0.3%
+            efficiency: 9500, // 95%
             lastUpdate: block.timestamp,
             isActive: true
         });
@@ -1749,7 +1775,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             fee: fee,
             borrower: msg.sender,
             timestamp: block.timestamp,
-            isActive: true
+            isActive: true,
+            isRepaid: false
         });
         
         allFlashLoans.push(flashId);
@@ -1825,6 +1852,8 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             accessLatency: 1,
             reliability: 9500,
             lastUpdate: block.timestamp,
+            capacity: capacity,
+            utilization: 0,
             isActive: true,
             isEmergencySource: false
         });
@@ -2088,6 +2117,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
             reserveAmount: emergencyAmount,
             utilizationRate: 0,
             lastActivation: block.timestamp,
+            emergencyThreshold: emergencyAmount / 2,
             isActive: true
         });
         
@@ -2134,15 +2164,23 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         address asset,
         uint256 targetUtilization,
         uint256 rebalanceThreshold,
+        uint256 efficiencyTarget,
+        uint256 gasOptimizationLevel,
+        uint256 slippageTolerance,
         uint256 maxSlippage,
+        bool autoOptimize,
         bool autoRebalance
     ) external onlyRole(LIQUIDITY_MANAGER_ROLE) {
         optimizationConfigs[asset] = OptimizationConfig({
             rebalanceThreshold: rebalanceThreshold,
-            efficiencyTarget: targetUtilization,
-            gasOptimizationLevel: 5000, // Default gas optimization
-            slippageTolerance: maxSlippage,
-            autoOptimize: autoRebalance
+            efficiencyTarget: efficiencyTarget,
+            gasOptimizationLevel: gasOptimizationLevel,
+            gasOptimization: gasOptimizationLevel,
+            slippageTolerance: slippageTolerance,
+            maxSlippage: maxSlippage,
+            autoOptimize: autoOptimize,
+            autoRebalance: autoRebalance,
+            lastUpdate: block.timestamp
         });
     }
     
@@ -2660,7 +2698,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
     function isAssetHealthy(
         address asset
     ) external view returns (bool) {
-        (bool healthy,) = this.getAssetHealth(asset);
+        (bool healthy,,,) = this.getAssetHealth(asset);
         return healthy;
     }
     
@@ -2715,7 +2753,7 @@ contract InfiniteLiquidityEngine is AccessControl, ReentrancyGuard, Pausable {
         uint256 sourceHealth,
         uint256 routeHealth
     ) {
-        isHealthy = this.isSystemHealthy();
+        (isHealthy,) = this.isSystemHealthy();
         liquidityHealth = totalValueLocked > 0 ? 100 : 0;
         sourceHealth = activeSources.length > 0 ? 100 : 0;
         routeHealth = allRoutes.length > 0 ? 100 : 0;

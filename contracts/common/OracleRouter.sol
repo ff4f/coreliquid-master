@@ -63,6 +63,13 @@ contract OracleRouter {
         emit TWAPUpdated(token, price);
     }
     
+    function getHistoricalPrices(address token, uint256 period) external view returns (uint256[] memory) {
+        // Return array with current TWAP price for now
+        uint256[] memory prices = new uint256[](1);
+        prices[0] = getTWAPPrice(token);
+        return prices;
+    }
+    
     function _scalePrice(uint256 price, uint8 decimals) internal pure returns (uint256) {
         if (decimals == 18) {
             return price;
