@@ -5,12 +5,16 @@ import "./globals.css"
 import "@rainbow-me/rainbowkit/styles.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import Header from "@/components/header"
-import { Toaster } from "@/components/ui/toaster"
+
 import { Web3Background } from "@/components/web3-background"
-import { PortfolioProvider } from "@/contexts/portfolio-context"
+
 import { Providers } from "@/components/providers"
 
-const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: 'swap',
+  fallback: ['system-ui', 'arial']
+})
 
 export const metadata: Metadata = {
   title: "CoreFluidX - Unified Liquidity Protocol",
@@ -43,14 +47,11 @@ export default function RootLayout({
       <body className={inter.className}>
         <Providers>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-            <PortfolioProvider>
-              <Web3Background />
-              <div className="relative z-10 min-h-screen flex flex-col">
-                <Header />
-                <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
-              </div>
-              <Toaster />
-            </PortfolioProvider>
+            <Web3Background />
+             <div className="relative z-10 min-h-screen flex flex-col">
+               <Header />
+               <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
+             </div>
           </ThemeProvider>
         </Providers>
       </body>

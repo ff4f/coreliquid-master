@@ -9,6 +9,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Handle static assets
+  assetPrefix: process.env.NODE_ENV === 'production' ? '' : '',
   webpack: (config, { isServer }) => {
     // Handle missing modules
     config.resolve.fallback = {
