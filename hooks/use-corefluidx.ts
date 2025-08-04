@@ -204,22 +204,9 @@ export const useCoreFluidX = (options: UseCoreFluidXOptions = {}): UseCoreFluidX
         refreshRevenueData()
       },
       
-      onAutomationExecuted: (event) => {
-        toast.info(`Automation executed: ${event.taskType}`)
-        refreshAutomationStatus()
-      },
+
       
-      onEmergencyStop: (event) => {
-        dispatch({
-          type: 'EMERGENCY_STOP',
-          payload: {
-            reason: event.reason,
-            timestamp: Number(event.timestamp) * 1000,
-          },
-        })
-        toast.error(`Emergency stop triggered: ${event.reason}`)
-        refreshAutomationStatus()
-      },
+
     })
   }, [dispatch])
 

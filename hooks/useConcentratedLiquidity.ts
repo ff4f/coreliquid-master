@@ -111,8 +111,9 @@ export function useConcentratedLiquidity() {
     abi: UNIFIED_LIQUIDITY_POOL_ABI,
     functionName: 'getUserPositions',
     args: address ? [address] : undefined,
-    enabled: !!address && isConnected,
-    watch: true
+    query: {
+       enabled: !!address && isConnected
+     }
   });
 
   // Get optimal tick range
@@ -125,7 +126,9 @@ export function useConcentratedLiquidity() {
       '0x7448c7456a97769F6cD04F1E83A4a23cCdC46aBD', // WETH on Core
       3000 // 0.3% fee tier
     ],
-    enabled: isConnected
+    query: {
+      enabled: isConnected
+    }
   });
 
   const fetchMetrics = useCallback(async () => {
@@ -236,7 +239,7 @@ export function useConcentratedLiquidity() {
       fetchMetrics();
     } catch (err) {
       console.error('Error updating position:', err);
-      toast.error(`Rebalance failed: ${err.message}`);
+      toast.error(`Rebalance failed: ${(err as Error).message}`);
     }
   }, [writeContract, refetchPositions, fetchMetrics]);
 
@@ -257,7 +260,7 @@ export function useConcentratedLiquidity() {
       fetchMetrics();
     } catch (err) {
       console.error('Error optimizing range:', err);
-      toast.error(`Auto-rebalance failed: ${err.message}`);
+      toast.error(`Auto-rebalance failed: ${(err as Error).message}`);
     }
   }, [writeContract, refetchPositions, fetchMetrics]);
 

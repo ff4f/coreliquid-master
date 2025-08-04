@@ -158,9 +158,9 @@ const CREDIT_MANAGER_ABI = [
   'event InstalmentPaid(address indexed user, address indexed asset, uint256 principalPaid, uint256 markupPaid)',
   'event MarketAdded(address indexed asset)',
   'event MarketUpdated(address indexed asset)',
-];
+] as const;
 
-
+const RISK_ENGINE_ABI = [
   'function calculateUserRiskProfile(address user) view returns (uint256 healthFactor, uint256 collateralValue, uint256 borrowValue)',
   'function checkLiquidation(address user) view returns (bool)',
   'function executeLiquidation(address user) returns (bool)',
@@ -792,7 +792,7 @@ export class CoreFluidXContracts {
    }
 
    // Risk Engine operations
-   
+   async getUserRiskProfile(user: string): Promise<{ healthFactor: string; collateral: string; borrow: string }> {
      const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
      return {
        healthFactor: ethers.formatUnits(hf, 18),
@@ -807,6 +807,11 @@ export class CoreFluidXContracts {
 
    async liquidate(user: string): Promise<any> {
      return await this.contracts.riskEngine.executeLiquidation(user);
+   }
+
+   async getHealthFactor(address: string): Promise<string> {
+     const profile = await this.getUserRiskProfile(address);
+     return profile.healthFactor;
    }
 
   // Get all contract addresses
@@ -832,28 +837,3 @@ export {
 
 // Export types
 export type { EventListeners };
-
-const RISK_ENGINE_ABI = [
-  'function calculateUserRiskProfile(address user) view returns (uint256 healthFactor, uint256 collateralValue, uint256 borrowValue)',
-  'function checkLiquidation(address user) view returns (bool)',
-  'function executeLiquidation(address user) returns (bool)',
-  'function getAssetRiskParameters(address asset) view returns (uint256 ltv, uint256 liquidationThreshold, uint256 liquidationBonus)',
-  'event LiquidationExecuted(address indexed user, address liquidator, uint256 repayAmount, uint256 seizeAmount)',
-] as const;
-
-async getUserRiskProfile(user: string): Promise<{ healthFactor: string; collateral: string; borrow: string }> {
-  const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
-  return {
-    healthFactor: ethers.formatUnits(hf, 18),
-    collateral: ethers.formatEther(col),
-    borrow: ethers.formatEther(bor),
-  };
-}
-
-async isLiquidatable(user: string): Promise<boolean> {
-  return await this.contracts.riskEngine.checkLiquidation(user);
-}
-
-async liquidate(user: string): Promise<any> {
-  return await this.contracts.riskEngine.executeLiquidation(user);
-}

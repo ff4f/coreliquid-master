@@ -534,7 +534,7 @@ export default function StakingPage() {
                 <div>
                   <p className="text-slate-400 text-sm">stCORE APY</p>
                   <p className="text-2xl font-bold text-white">
-                    {stCoreAPY ? formatAPY(stCoreAPY) : '0'}%
+                    {stCoreAPY && typeof stCoreAPY === 'string' ? formatAPY(BigInt(stCoreAPY)) : '0'}%
                   </p>
                   <p className="text-green-400 text-sm">Liquid Staking</p>
                 </div>
@@ -575,7 +575,7 @@ export default function StakingPage() {
                   {stakingInfo ? formatStakingValue(stakingInfo.coreStaked) : '0'}
                 </p>
                 <p className="text-slate-400">CORE Staked</p>
-                <p className="text-green-400 text-sm">{stCoreAPY ? formatAPY(stCoreAPY) : '0'}% APY</p>
+                <p className="text-green-400 text-sm">{stCoreAPY && typeof stCoreAPY === 'string' ? formatAPY(BigInt(stCoreAPY)) : '0'}% APY</p>
               </div>
               <div className="text-center">
                 <p className="text-3xl font-bold text-orange-400">
@@ -644,7 +644,7 @@ export default function StakingPage() {
                         </div>
                         <p className="text-slate-400 text-sm mb-3">{pool.description}</p>
                         <div className="flex flex-wrap gap-2 mb-4">
-                          {pool.features.map((feature, index) => (
+                          {pool.features.map((feature: string, index: number) => (
                             <Badge key={index} variant="outline" className="text-xs">
                               {feature}
                             </Badge>
@@ -1227,7 +1227,7 @@ export default function StakingPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   <div className="bg-slate-800/50 p-4 rounded-lg">
                     <p className="text-slate-400 text-sm">Current APY</p>
-                    <p className="text-2xl font-bold text-purple-400">{stCoreAPY ? formatStakingValue(stCoreAPY) : '0'}%</p>
+                    <p className="text-2xl font-bold text-purple-400">{stCoreAPY && typeof stCoreAPY === 'string' ? formatStakingValue(BigInt(stCoreAPY)) : '0'}%</p>
                   </div>
                   <div className="bg-slate-800/50 p-4 rounded-lg">
                     <p className="text-slate-400 text-sm">Exchange Rate</p>
@@ -1274,7 +1274,7 @@ export default function StakingPage() {
                       <h4 className="text-white font-medium mb-2">Estimated Annual Rewards</h4>
                       <p className="text-xl font-bold text-green-400">
                          {coreAmount && stCoreAPY ? 
-                           (Number(coreAmount) * Number(formatEther(stCoreAPY)) / 100).toFixed(4) : '0'
+                           (Number(coreAmount) * Number(formatEther(BigInt(stCoreAPY && typeof stCoreAPY === 'string' ? stCoreAPY : '0'))) / 100).toFixed(4) : '0'
                          } CORE
                        </p>
                     </div>
@@ -1333,7 +1333,7 @@ export default function StakingPage() {
                               toast.error('Please enter amount to unstake');
                               return;
                             }
-                            await handleCOREUnstake(unstakeAmount, '0');
+                            await handleCOREUnstake(unstakeAmount, 0);
                           }}
                           disabled={coreNativeLoading || !unstakeAmount}
                           className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50"

@@ -59,7 +59,10 @@ import {
   EyeOff, 
   Volume2, 
   VolumeX,
-  ArrowRight 
+  ArrowRight,
+  Mail,
+  Smartphone,
+  Monitor
 } from "lucide-react";
 
 interface Notification {

@@ -561,7 +561,7 @@ export default function AnalyticsPage() {
                     <span className="font-bold">1,890 (12%)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-sm">Whales (>$1M)</span>
+                    <span className="text-sm">Whales (&gt;$1M)</span>
                     <span className="font-bold">680 (5%)</span>
                   </div>
                 </div>
