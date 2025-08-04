@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 /**
  * @title InterestRateModel
  * @dev Dynamic interest rate model with multiple rate curves and risk-based adjustments
+ * @notice Modified for CoreFluid compliance - all interest rates return 0
  */
 contract InterestRateModel is AccessControl {
     using SafeMath for uint256;
@@ -55,6 +56,9 @@ contract InterestRateModel is AccessControl {
     uint256 public globalRiskMultiplier = PRECISION; // 1.0x default
     uint256 public emergencyRateMultiplier = PRECISION; // 1.0x default
     bool public emergencyMode = false;
+    
+    // CoreFluid compliance
+bool public coreFluidMode = true; // Always return 0 for interest rates
 
     event RateModelUpdated(address indexed asset, uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier);
     event RatesUpdated(address indexed asset, uint256 supplyRate, uint256 borrowRate, uint256 utilizationRate);
@@ -358,5 +362,28 @@ contract InterestRateModel is AccessControl {
      */
     function isAssetSupported(address asset) external view returns (bool) {
         return supportedAssets[asset];
+    }
+    
+    /**
+     * @dev Calculate interest rate (CoreFluid version)
+     * @param utilizationRate The utilization rate
+     * @return interestRate Always returns 0 for CoreFluid compliance
+     */
+    function calculateInterestRate(uint256 utilizationRate) external view returns (uint256 interestRate) {
+        if (coreFluidMode) {
+            return 0; // No interest in CoreFluid mode
+        }
+        
+        // Legacy interest calculation would go here
+        // For now, we always return 0 to maintain CoreFluid compliance
+        return 0;
+    }
+    
+    /**
+     * @dev Toggle CoreFluid mode
+     * @param enabled Whether to enable CoreFluid mode
+     */
+    function setCoreFluidMode(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        coreFluidMode = enabled;
     }
 }

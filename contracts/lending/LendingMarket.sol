@@ -9,6 +9,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "../interfaces/IOracle.sol";
 import "./InterestRateModel.sol";
+import "./FeeSpreadModel.sol";
+import "./CreditSaleManager.sol";
 
 /**
  * @title LendingMarket
@@ -86,8 +88,14 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
     
     address[] public allMarkets;
     InterestRateModel public interestRateModel;
+    FeeSpreadModel public feeSpreadModel;
+    CreditSaleManager public creditSaleManager;
     IOracle public priceOracle;
     address public treasury;
+    
+    // CoreFluid compliance flags
+bool public coreFluidMode = true; // Enable CoreFluid mode
+bool public interestDisabled = true; // Disable interest calculations
     
     // Events
     event Supply(address indexed user, address indexed asset, uint256 amount, uint256 newBalance);
@@ -103,6 +111,8 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
     
     constructor(
         address _interestRateModel,
+        address _feeSpreadModel,
+        address _creditSaleManager,
         address _priceOracle,
         address _treasury
     ) {
@@ -112,6 +122,8 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
         _grantRole(RISK_MANAGER_ROLE, msg.sender);
         
         interestRateModel = InterestRateModel(_interestRateModel);
+        feeSpreadModel = FeeSpreadModel(_feeSpreadModel);
+        creditSaleManager = CreditSaleManager(_creditSaleManager);
         priceOracle = IOracle(_priceOracle);
         treasury = _treasury;
     }
@@ -202,12 +214,12 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Calculate supply APY for an asset
      * @param asset The asset to calculate APY for
-     * @return The annual percentage yield in basis points
+     * @return The annual percentage yield in basis points (0 in zero-interest mode)
      */
     function calculateSupplyAPY(address asset) public view returns (uint256) {
         Market storage market = markets[asset];
-        if (!market.isActive || market.totalSupply == 0) {
-            return 0;
+        if (!market.isActive || market.totalSupply == 0 || coreFluidMode || interestDisabled) {
+            return 0; // No interest in CoreFluid mode
         }
         
         uint256 utilizationRate = _calculateUtilizationRate(asset);
@@ -256,13 +268,21 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
     }
     
     /**
-     * @dev Accrue interest for a market
+     * @dev Accrue interest for a market (disabled in zero-interest mode)
      * @param asset The asset to accrue interest for
      */
     function accrueInterest(address asset) public {
         Market storage market = markets[asset];
         
         if (!market.isActive) {
+            return;
+        }
+        
+        // Skip interest accrual in CoreFluid mode
+        if (coreFluidMode || interestDisabled) {
+            market.lastUpdateTimestamp = block.timestamp;
+            market.supplyRate = 0;
+            market.borrowRate = 0;
             return;
         }
         
@@ -305,6 +325,87 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
         }
         
         emit InterestAccrued(asset, supplyRate, borrowRate);
+    }
+    
+    /**
+     * @dev Request credit sale quote (zero-interest borrowing)
+     * @param collateralAsset The collateral asset
+     * @param collateralAmount The collateral amount
+     * @param creditAmount The desired credit amount
+     * @param instalmentCount Number of instalments
+     * @return orderId The credit order ID
+     * @return fixedTotalPrice The total fixed price
+     */
+    function requestCreditSale(
+        address collateralAsset,
+        uint256 collateralAmount,
+        uint256 creditAmount,
+        uint256 instalmentCount
+    ) external nonReentrant whenNotPaused returns (uint256 orderId, uint256 fixedTotalPrice) {
+        require(coreFluidMode, "Credit sales only available in CoreFluid mode");
+        require(isMarketListed[collateralAsset], "Collateral market not listed");
+        
+        // Delegate to CreditSaleManager
+        return creditSaleManager.requestQuote(
+            collateralAsset,
+            collateralAmount,
+            creditAmount,
+            instalmentCount
+        );
+    }
+    
+    /**
+     * @dev Traditional borrow function (disabled in zero-interest mode)
+     * @param asset The asset to borrow
+     * @param amount The amount to borrow
+     */
+    function borrow(address asset, uint256 amount) external nonReentrant whenNotPaused {
+        require(!coreFluidMode, "Traditional borrowing disabled in CoreFluid mode");
+        require(!interestDisabled, "Interest-based borrowing is disabled");
+        require(amount > 0, "Amount must be greater than 0");
+        require(isMarketListed[asset], "Market not listed");
+        
+        Market storage market = markets[asset];
+        require(market.isActive && market.canBorrow, "Market not active for borrowing");
+        require(market.totalBorrow + amount <= market.borrowCap, "Borrow cap exceeded");
+        
+        // Traditional borrow logic would go here
+        // For now, we redirect to credit sale system
+        revert("Please use requestCreditSale for CoreFluid borrowing");
+    }
+    
+    /**
+     * @dev Get fee spread quote for credit sale
+     * @param asset The asset
+     * @param principal The principal amount
+     * @return feeSpread The fee spread in basis points
+     * @return fixedPrice The total fixed price
+     */
+    function getFeeSpreadQuote(address asset, uint256 principal) external view returns (uint256 feeSpread, uint256 fixedPrice) {
+        require(coreFluidMode, "Fee spread quotes only available in CoreFluid mode");
+        require(feeSpreadModel.isAssetSupported(asset), "Asset not supported for fee spread");
+        
+        feeSpread = feeSpreadModel.calculateFeeSpread(asset);
+        fixedPrice = feeSpreadModel.calculateFixedPrice(principal, asset);
+        
+        return (feeSpread, fixedPrice);
+    }
+    
+    /**
+     * @dev Toggle CoreFluid mode
+     * @param enabled Whether to enable CoreFluid mode
+     */
+    function setCoreFluidMode(bool enabled) external onlyRole(ADMIN_ROLE) {
+        coreFluidMode = enabled;
+        interestDisabled = enabled; // Auto-disable interest when CoreFluid mode is enabled
+    }
+    
+    /**
+     * @dev Toggle interest calculations
+     * @param disabled Whether to disable interest
+     */
+    function setInterestDisabled(bool disabled) external onlyRole(ADMIN_ROLE) {
+        interestDisabled = disabled;
     }
     
     /**
