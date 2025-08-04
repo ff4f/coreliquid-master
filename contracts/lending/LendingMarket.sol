@@ -38,8 +38,8 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
         IERC20 asset;
         uint256 totalSupply;
         uint256 totalBorrow;
-        uint256 supplyRate;
-        uint256 borrowRate;
+        uint256 supplyRate;        // Always 0 for fixed-cost compliance
+        uint256 borrowRate;       // Always 0 for fixed-cost compliance
         uint256 utilizationRate;
         uint256 reserveFactor;
         uint256 collateralFactor;
@@ -54,6 +54,9 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
         uint256 supplyIndex;
         uint256 borrowIndex;
         uint256 totalReserves;
+        // Fixed-cost fields
+        uint256 fixedMarkupBps;   // Fixed markup in basis points
+        uint256 tenor;            // Default tenor in days
     }
     
     struct UserAccount {
@@ -63,6 +66,13 @@ contract LendingMarket is AccessControl, ReentrancyGuard, Pausable {
         uint256 borrowIndex;
         uint256 lastInterestAccrual;
         bool isCollateralEnabled;
+        // Fixed-cost fields
+        uint256 fixedTotalPrice;  // Fixed total price for credit order
+        uint256 installmentAmount; // Fixed installment amount
+        uint256 paidAmount;       // Amount paid so far
+        uint256 installmentCount; // Total number of installments
+        uint256 paidInstallments; // Number of installments paid
+        uint256 dueDate;          // Final due date
     }
     
     struct SupplySnapshot {
@@ -100,8 +110,9 @@ bool public interestDisabled = true; // Disable interest calculations
     // Events
     event Supply(address indexed user, address indexed asset, uint256 amount, uint256 newBalance);
     event Withdraw(address indexed user, address indexed asset, uint256 amount, uint256 newBalance);
-    event Borrow(address indexed user, address indexed asset, uint256 amount, uint256 newBalance);
+    event Borrow(address indexed user, address indexed asset, uint256 principal, uint256 fixedTotalPrice);
     event Repay(address indexed user, address indexed asset, uint256 amount, uint256 newBalance);
+    event InstallmentPaid(address indexed user, address indexed asset, uint256 amount, uint256 installmentNumber, uint256 remainingBalance);
     event MarketAdded(address indexed asset, address indexed market);
     event MarketUpdated(address indexed asset);
     event InterestAccrued(address indexed asset, uint256 supplyRate, uint256 borrowRate);
@@ -355,13 +366,23 @@ bool public interestDisabled = true; // Disable interest calculations
     }
     
     /**
-     * @dev Traditional borrow function (disabled in zero-interest mode)
+     * @dev Calculate fixed price for fixed-cost credit sale
+     * @param asset The asset address
+     * @param principal The principal amount
+     * @param markupBps The markup in basis points
+     * @return The total fixed price including markup
+     */
+    function quoteFixedPrice(address asset, uint256 principal, uint256 markupBps) public view returns (uint256) {
+        require(principal > 0, "Principal must be greater than 0");
+        return principal + (principal * markupBps) / 10000;
+    }
+
+    /**
+     * @dev Fixed-cost borrow function - initiates fixed-cost credit order
      * @param asset The asset to borrow
-     * @param amount The amount to borrow
+     * @param amount The amount to borrow (principal)
      */
     function borrow(address asset, uint256 amount) external nonReentrant whenNotPaused {
-        require(!coreFluidMode, "Traditional borrowing disabled in CoreFluid mode");
-        require(!interestDisabled, "Interest-based borrowing is disabled");
         require(amount > 0, "Amount must be greater than 0");
         require(isMarketListed[asset], "Market not listed");
         
@@ -369,11 +390,86 @@ bool public interestDisabled = true; // Disable interest calculations
         require(market.isActive && market.canBorrow, "Market not active for borrowing");
         require(market.totalBorrow + amount <= market.borrowCap, "Borrow cap exceeded");
         
-        // Traditional borrow logic would go here
-        // For now, we redirect to credit sale system
-        revert("Please use requestCreditSale for CoreFluid borrowing");
+        // Fixed-cost: Calculate fixed total price with markup
+        uint256 fixedTotalPrice = quoteFixedPrice(asset, amount, market.fixedMarkupBps);
+        uint256 installmentAmount = fixedTotalPrice / market.tenor;
+        
+        UserAccount storage userAccount = userAccounts[msg.sender][asset];
+        
+        // Initialize credit order
+        if (userAccount.borrowed == 0) {
+            userBorrowedAssets[msg.sender].push(asset);
+        }
+        
+        userAccount.borrowed = amount;
+        userAccount.fixedTotalPrice = fixedTotalPrice;
+        userAccount.installmentAmount = installmentAmount;
+        userAccount.installmentCount = market.tenor;
+        userAccount.paidInstallments = 0;
+        userAccount.paidAmount = 0;
+        userAccount.dueDate = block.timestamp + (market.tenor * 1 days);
+        
+        // Update market totals (ensure rates stay 0)
+        market.totalBorrow += amount;
+        market.supplyRate = 0;
+        market.borrowRate = 0;
+        
+        // Transfer asset to borrower
+        IERC20(asset).transfer(msg.sender, amount);
+        
+        emit Borrow(msg.sender, asset, amount, fixedTotalPrice);
     }
-    
+
+    /**
+     * @dev Pay installment for fixed-cost credit order
+     * @param asset The asset to pay installment for
+     * @param amount The installment amount to pay
+     */
+    function payInstallment(address asset, uint256 amount) external nonReentrant whenNotPaused {
+        require(amount > 0, "Amount must be greater than 0");
+        require(isMarketListed[asset], "Market not listed");
+        
+        UserAccount storage userAccount = userAccounts[msg.sender][asset];
+        require(userAccount.borrowed > 0, "No active credit order");
+        require(userAccount.paidAmount < userAccount.fixedTotalPrice, "Credit order already paid");
+        require(block.timestamp <= userAccount.dueDate, "Credit order overdue");
+        
+        // Calculate remaining balance
+        uint256 remainingBalance = userAccount.fixedTotalPrice - userAccount.paidAmount;
+        uint256 paymentAmount = amount > remainingBalance ? remainingBalance : amount;
+        
+        // Update payment tracking
+        userAccount.paidAmount += paymentAmount;
+        
+        // Calculate installments paid (for tracking purposes)
+        uint256 installmentsPaid = userAccount.paidAmount / userAccount.installmentAmount;
+        if (installmentsPaid > userAccount.paidInstallments) {
+            userAccount.paidInstallments = installmentsPaid;
+        }
+        
+        // Transfer payment from user
+        IERC20(asset).transferFrom(msg.sender, address(this), paymentAmount);
+        
+        // If fully paid, clear the credit order
+        if (userAccount.paidAmount >= userAccount.fixedTotalPrice) {
+            Market storage market = markets[asset];
+            market.totalBorrow -= userAccount.borrowed;
+            
+            // Reset user account
+            userAccount.borrowed = 0;
+            userAccount.fixedTotalPrice = 0;
+            userAccount.installmentAmount = 0;
+            userAccount.installmentCount = 0;
+            userAccount.paidInstallments = 0;
+            userAccount.paidAmount = 0;
+            userAccount.dueDate = 0;
+            
+            _removeFromBorrowedAssets(msg.sender, asset);
+        }
+        
+        emit InstallmentPaid(msg.sender, asset, paymentAmount, userAccount.paidInstallments, remainingBalance - paymentAmount);
+    }
+
     /**
      * @dev Get fee spread quote for credit sale
      * @param asset The asset
@@ -446,7 +542,9 @@ bool public interestDisabled = true; // Disable interest calculations
         uint256 liquidationThreshold,
         uint256 liquidationBonus,
         uint256 borrowCap,
-        uint256 supplyCap
+        uint256 supplyCap,
+        uint256 fixedMarkupBps,
+        uint256 tenor
     ) external onlyRole(ADMIN_ROLE) {
         require(!isMarketListed[asset], "Market already listed");
         require(collateralFactor <= PRECISION, "Invalid collateral factor");
@@ -473,7 +571,9 @@ bool public interestDisabled = true; // Disable interest calculations
             lastUpdateTimestamp: block.timestamp,
             supplyIndex: PRECISION,
             borrowIndex: PRECISION,
-            totalReserves: 0
+            totalReserves: 0,
+            fixedMarkupBps: fixedMarkupBps,
+            tenor: tenor
         });
         
         isMarketListed[asset] = true;
@@ -588,6 +688,17 @@ bool public interestDisabled = true; // Disable interest calculations
     
     function _removeFromSuppliedAssets(address user, address asset) internal {
         address[] storage assets = userSuppliedAssets[user];
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i] == asset) {
+                assets[i] = assets[assets.length - 1];
+                assets.pop();
+                break;
+            }
+        }
+    }
+    
+    function _removeFromBorrowedAssets(address user, address asset) internal {
+        address[] storage assets = userBorrowedAssets[user];
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i] == asset) {
                 assets[i] = assets[assets.length - 1];

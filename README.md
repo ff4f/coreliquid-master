@@ -25,6 +25,15 @@ CoreLiquid is an advanced DeFi infrastructure built specifically for Core Blockc
 - ✅ Reputation scoring system
 - ✅ Emergency pause/unpause functionality
 
+### 3. Fixed-Cost Lending System
+**Zero-Interest Asset-Backed Credit with Traditional Terminology**
+- ✅ **No Variable Interest**: All borrowRate and supplyRate permanently set to 0
+- ✅ **Fixed-Cost Credit**: Borrow operations initiate one-time markup calculation
+- ✅ **Equal Installments**: Fixed payment schedule with predetermined total cost
+- ✅ **Asset-Backed**: Credit sales with transparent markup structure
+- ✅ **Traditional UI**: Familiar "Deposit/Borrow" terminology for mainstream adoption
+- ✅ **Technical Transparency**: All interest calculations disabled and auditable
+
 ## 🏗️ Project Structure
 
 ```
@@ -109,7 +118,20 @@ forge test --match-contract TrueUnifiedLiquidityLayerTest -vv
 ### Test Coverage
 - **CoreBitcoinDualStaking**: 15 comprehensive test cases
 - **TrueUnifiedLiquidityLayer**: 11 test cases covering core functionality
+- **Fixed-Cost Lending**: Invariant and fuzz tests ensuring 0% interest
 - **All tests passing** ✅
+
+### Fixed-Cost Lending Testing
+```bash
+# Run invariant tests
+npm test test/FixedCostInvariant.test.js
+
+# Run fuzz tests
+npm test test/FixedCostFuzz.test.js
+
+# Run CoreFluid compliance tests
+npm test test/CoreFluidCompliance.test.js
+```
 
 ## 📋 Core Contracts
 
@@ -139,6 +161,35 @@ function updateDailyRewardRate(uint256 newRate)
 - Cross-protocol liquidity access
 - Automated rebalancing
 - Protocol allocation management
+
+### LendingMarket.sol (Fixed-Cost Mode)
+**Main Features:**
+- Fixed-cost credit sales (no variable interest)
+- Equal installment payment system
+- Transparent markup calculation
+- Traditional lending terminology
+
+**Key Functions:**
+```solidity
+// Core lending functions
+function supply(address asset, uint256 amount)  // Traditional deposit
+function borrow(address asset, uint256 amount) // Fixed-cost credit initiation
+function payInstallment(address asset, uint256 amount) // Installment payment
+
+// Fixed-cost calculations
+function quoteFixedPrice(address asset, uint256 principal, uint256 markupBps) // Fixed price quote
+function calculateSupplyAPY(address asset) // Always returns 0
+
+// Market management
+function addMarket(address asset, ..., uint256 fixedMarkupBps, uint256 tenor)
+```
+
+**Technical Guarantees:**
+- `borrowRate` and `supplyRate` permanently set to 0
+- `accrueInterest()` disabled in fixed-cost mode
+- Fixed markup calculated once at borrow initiation
+- No compound interest or variable rates
+- Installment payments tracked with precision
 - Advanced analytics
 
 **Key Functions:**
