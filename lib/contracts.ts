@@ -152,6 +152,14 @@ const LENDING_MARKET_ABI = [
   'event Repaid(address indexed user, address indexed token, uint256 amount)',
 ];
 
+
+  'function calculateUserRiskProfile(address user) view returns (uint256 healthFactor, uint256 collateralValue, uint256 borrowValue)',
+  'function checkLiquidation(address user) view returns (bool)',
+  'function executeLiquidation(address user) returns (bool)',
+  'function getAssetRiskParameters(address asset) view returns (uint256 ltv, uint256 liquidationThreshold, uint256 liquidationBonus)',
+  'event LiquidationExecuted(address indexed user, address liquidator, uint256 repayAmount, uint256 seizeAmount)',
+] as const;
+
 // Event listener types
 interface EventListeners {
   onDeposit?: (event: any) => void;
@@ -237,6 +245,12 @@ export class CoreFluidXContracts {
     this.contracts.optimizedTULL = new Contract(
       CONTRACT_ADDRESSES.OPTIMIZED_TULL,
       OPTIMIZED_TULL_ABI,
+      this.signer
+    );
+
+    this.contracts.riskEngine = new Contract(
+      CONTRACT_ADDRESSES.RISK_ENGINE,
+      RISK_ENGINE_ABI,
       this.signer
     );
   }
@@ -740,6 +754,24 @@ export class CoreFluidXContracts {
      return await this.contracts.optimizedTULL.deactivateProtocol(protocol);
    }
 
+   // Risk Engine operations
+   
+     const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
+     return {
+       healthFactor: ethers.formatUnits(hf, 18),
+       collateral: ethers.formatEther(col),
+       borrow: ethers.formatEther(bor),
+     };
+   }
+
+   async isLiquidatable(user: string): Promise<boolean> {
+     return await this.contracts.riskEngine.checkLiquidation(user);
+   }
+
+   async liquidate(user: string): Promise<any> {
+     return await this.contracts.riskEngine.executeLiquidation(user);
+   }
+
   // Get all contract addresses
   getContractAddresses() {
     return CONTRACT_ADDRESSES;
@@ -758,7 +790,33 @@ export {
   LENDING_MARKET_ABI,
   SIMPLE_TULL_ABI,
   OPTIMIZED_TULL_ABI,
+  RISK_ENGINE_ABI,
 };
 
 // Export types
 export type { EventListeners };
+
+const RISK_ENGINE_ABI = [
+  'function calculateUserRiskProfile(address user) view returns (uint256 healthFactor, uint256 collateralValue, uint256 borrowValue)',
+  'function checkLiquidation(address user) view returns (bool)',
+  'function executeLiquidation(address user) returns (bool)',
+  'function getAssetRiskParameters(address asset) view returns (uint256 ltv, uint256 liquidationThreshold, uint256 liquidationBonus)',
+  'event LiquidationExecuted(address indexed user, address liquidator, uint256 repayAmount, uint256 seizeAmount)',
+] as const;
+
+async getUserRiskProfile(user: string): Promise<{ healthFactor: string; collateral: string; borrow: string }> {
+  const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
+  return {
+    healthFactor: ethers.formatUnits(hf, 18),
+    collateral: ethers.formatEther(col),
+    borrow: ethers.formatEther(bor),
+  };
+}
+
+async isLiquidatable(user: string): Promise<boolean> {
+  return await this.contracts.riskEngine.checkLiquidation(user);
+}
+
+async liquidate(user: string): Promise<any> {
+  return await this.contracts.riskEngine.executeLiquidation(user);
+}
