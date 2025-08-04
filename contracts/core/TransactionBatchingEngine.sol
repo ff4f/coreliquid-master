@@ -366,8 +366,8 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         }
         
         if (validOps >= minBatchSize) {
-            // Trigger auto-execution (would need to be called by a keeper/bot)
-            // This is a placeholder for the actual auto-execution logic
+            // Trigger auto-execution
+            _executeAutoBatch()
         }
     }
     
@@ -441,5 +441,43 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         maxBatchSize = newMaxBatchSize;
         minBatchSize = newMinBatchSize;
         batchTimeout = newBatchTimeout;
+    }
+
+    /**
+     * @dev Execute auto batch when conditions are met
+     */
+    function _executeAutoBatch() internal {
+        // Create a new batch with pending operations
+        uint256[] memory operationsToExecute = new uint256[](pendingOperations.length);
+        uint256 validCount = 0;
+        
+        // Filter valid operations
+        for (uint256 i = 0; i < pendingOperations.length; i++) {
+            uint256 opId = pendingOperations[i];
+            BatchOperation storage op = batchOperations[opId];
+            
+            if (op.status == OperationStatus.PENDING && 
+                block.timestamp >= op.earliestExecution &&
+                block.timestamp <= op.deadline) {
+                operationsToExecute[validCount] = opId;
+                validCount++;
+                
+                if (validCount >= maxBatchSize) {
+                    break;
+                }
+            }
+        }
+        
+        // Execute the batch if we have enough operations
+        if (validCount >= minBatchSize) {
+            // Resize array to actual count
+            uint256[] memory finalOperations = new uint256[](validCount);
+            for (uint256 i = 0; i < validCount; i++) {
+                finalOperations[i] = operationsToExecute[i];
+            }
+            
+            // Execute the batch
+            executeBatch(finalOperations);
+        }
     }
 }

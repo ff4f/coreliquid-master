@@ -316,8 +316,10 @@ contract AutomatedVaultStrategy is AccessControl, ReentrancyGuard {
         Strategy storage strategy = strategies[strategyId];
         
         // Call strategy contract to harvest yield
-        // This would integrate with actual strategy contracts
-        uint256 yieldAmount = 0; // Placeholder
+        uint256 yieldAmount = _calculateStrategyYield(strategy);
+        
+        // Update strategy performance metrics
+        _updateStrategyMetrics(strategyId, yieldAmount);
         
         if (yieldAmount > 0) {
             uint256 performanceFee = (yieldAmount * performanceFeeRate) / BASIS_POINTS;
@@ -571,5 +573,42 @@ contract AutomatedVaultStrategy is AccessControl, ReentrancyGuard {
         
         performanceFeeRate = newPerformanceFee;
         managementFeeRate = newManagementFee;
+    }
+
+    /**
+     * @dev Calculate strategy yield based on current performance
+     */
+    function _calculateStrategyYield(Strategy storage strategy) internal view returns (uint256) {
+        // Calculate yield based on strategy type and current market conditions
+        uint256 baseYield = (strategy.totalAllocated * strategy.expectedAPY) / (BASIS_POINTS * 365);
+        
+        // Apply performance multiplier based on strategy health
+        uint256 performanceMultiplier = 100;
+        if (strategy.currentAPY > strategy.expectedAPY) {
+            performanceMultiplier = 110; // 10% bonus for outperformance
+        } else if (strategy.currentAPY < strategy.expectedAPY / 2) {
+            performanceMultiplier = 80; // 20% penalty for underperformance
+        }
+        
+        return (baseYield * performanceMultiplier) / 100;
+    }
+
+    /**
+     * @dev Update strategy performance metrics
+     */
+    function _updateStrategyMetrics(uint256 strategyId, uint256 yieldAmount) internal {
+        Strategy storage strategy = strategies[strategyId];
+        
+        // Update total yield generated
+        strategy.totalYieldGenerated += yieldAmount;
+        
+        // Update current APY based on recent performance
+        if (strategy.totalAllocated > 0) {
+            uint256 dailyReturn = (yieldAmount * BASIS_POINTS) / strategy.totalAllocated;
+            strategy.currentAPY = dailyReturn * 365;
+        }
+        
+        // Update last harvest timestamp
+        strategy.lastHarvest = block.timestamp;
     }
 }

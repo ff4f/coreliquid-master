@@ -194,8 +194,41 @@ contract ComprehensiveRiskEngine is AccessControl, ReentrancyGuard {
         uint256 weightedLiquidationThreshold = 0;
         uint256 concentrationRisk = 0;
         
-        // This would integrate with the accounting system to get actual balances
-        // For now, using placeholder logic
+        // Get user positions from accounting system
+        address[] memory collateralAssets = accountingSystem.getUserCollateralAssets(user);
+        address[] memory debtAssets = accountingSystem.getUserDebtAssets(user);
+        
+        // Calculate total collateral value
+        for (uint256 i = 0; i < collateralAssets.length; i++) {
+            address asset = collateralAssets[i];
+            uint256 balance = accountingSystem.getUserCollateralBalance(user, asset);
+            if (balance > 0) {
+                uint256 price = priceOracle.getPrice(asset);
+                uint256 assetValue = (balance * price) / PRECISION;
+                totalCollateralValue += assetValue;
+                
+                AssetRiskConfig memory config = assetRiskConfigs[asset];
+                weightedLiquidationThreshold += assetValue * config.liquidationThreshold;
+            }
+        }
+        
+        // Calculate total debt value
+        for (uint256 i = 0; i < debtAssets.length; i++) {
+            address asset = debtAssets[i];
+            uint256 balance = accountingSystem.getUserDebtBalance(user, asset);
+            if (balance > 0) {
+                uint256 price = priceOracle.getPrice(asset);
+                totalDebtValue += (balance * price) / PRECISION;
+            }
+        }
+        
+        // Calculate concentration risk
+        concentrationRisk = _calculateConcentrationRisk(user, collateralAssets, totalCollateralValue);
+        
+        // Finalize weighted liquidation threshold
+        if (totalCollateralValue > 0) {
+            weightedLiquidationThreshold = weightedLiquidationThreshold / totalCollateralValue;
+        }
         
         uint256 healthFactor = totalDebtValue > 0 ? 
             (totalCollateralValue * weightedLiquidationThreshold) / (totalDebtValue * BASIS_POINTS) : 
@@ -353,8 +386,34 @@ contract ComprehensiveRiskEngine is AccessControl, ReentrancyGuard {
         uint256 expectedLiquidations = 0;
         uint256 expectedLosses = 0;
         
-        // This would iterate through all users and calculate impact
-        // For brevity, using placeholder values
+        // Iterate through all users and calculate stress test impact
+        address[] memory allUsers = accountingSystem.getAllUsers();
+        
+        for (uint256 i = 0; i < allUsers.length; i++) {
+            address user = allUsers[i];
+            UserRiskProfile memory profile = userRiskProfiles[user];
+            
+            if (profile.totalDebtValue > 0) {
+                // Apply stress scenario to user's portfolio
+                uint256 stressedCollateralValue = _applyStressToCollateral(user, scenario);
+                uint256 stressedDebtValue = _applyStressToDebt(user, scenario);
+                
+                // Calculate stressed health factor
+                uint256 stressedHealthFactor = stressedDebtValue > 0 ? 
+                    (stressedCollateralValue * profile.liquidationThreshold) / (stressedDebtValue * BASIS_POINTS) : 
+                    type(uint256).max;
+                
+                // Check if user would be liquidated
+                if (stressedHealthFactor < PRECISION) {
+                    expectedLiquidations++;
+                    
+                    // Calculate potential loss
+                    uint256 shortfall = stressedDebtValue > stressedCollateralValue ? 
+                        stressedDebtValue - stressedCollateralValue : 0;
+                    expectedLosses += shortfall;
+                }
+            }
+        }
         
         scenario.expectedLiquidations = expectedLiquidations;
         scenario.expectedLosses = expectedLosses;

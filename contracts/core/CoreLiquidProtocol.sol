@@ -319,10 +319,9 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         
         // Execute deposit through DepositManager (simplified interface)
         bytes32 depositId = depositManager.deposit(token, amount);
-        // For now, assume LP tokens equal deposited amount (placeholder logic)
-        uint256 lpTokens = amount;
-        // Silence unused variable warning for minLPTokens until full LP logic implemented
-        minLPTokens;
+        // Calculate LP tokens based on current pool ratio
+        uint256 lpTokens = _calculateLPTokens(token, amount);
+        require(lpTokens >= minLPTokens, "Insufficient LP tokens received");
         
         // Update user profile
         profile.totalDeposited += amount;
@@ -753,5 +752,23 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         }
         
         _updateProtocolMetrics();
+    }
+
+    /**
+     * @dev Calculate LP tokens to mint based on deposit amount and current pool state
+     */
+    function _calculateLPTokens(address token, uint256 amount) internal view returns (uint256) {
+        // Get current pool state from vault manager
+        uint256 totalPoolValue = vaultManager.getTotalPoolValue(token);
+        uint256 totalLPSupply = vaultManager.getTotalLPSupply(token);
+        
+        if (totalLPSupply == 0 || totalPoolValue == 0) {
+            // First deposit - 1:1 ratio
+            return amount;
+        }
+        
+        // Calculate LP tokens based on proportional share
+        // lpTokens = (depositAmount * totalLPSupply) / totalPoolValue
+        return (amount * totalLPSupply) / totalPoolValue;
     }
 }

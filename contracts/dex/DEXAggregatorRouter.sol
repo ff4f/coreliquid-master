@@ -403,9 +403,32 @@ contract DEXAggregatorRouter is AccessControl, ReentrancyGuard {
         uint256 amountIn,
         TradeRoute memory route
     ) internal returns (uint256) {
-        // Implementation would execute the trade on the specified DEX
-        // For now, returning a placeholder
-        return route.expectedOutput;
+        require(route.poolIds.length > 0, "Invalid route");
+        
+        uint256 currentAmount = amountIn;
+        address currentTokenIn = tokenIn;
+        address currentTokenOut;
+        
+        // Execute trades through each pool in the route
+        for (uint256 i = 0; i < route.poolIds.length; i++) {
+            bytes32 poolId = route.poolIds[i];
+            LiquidityPool storage pool = liquidityPools[poolId];
+            require(pool.isActive, "Pool not active");
+            
+            // Determine output token for this hop
+            if (i == route.poolIds.length - 1) {
+                currentTokenOut = tokenOut;
+            } else {
+                // For multi-hop, determine intermediate token
+                currentTokenOut = pool.token0 == currentTokenIn ? pool.token1 : pool.token0;
+            }
+            
+            // Execute swap on the pool
+            currentAmount = _executePoolSwap(poolId, currentTokenIn, currentTokenOut, currentAmount);
+            currentTokenIn = currentTokenOut;
+        }
+        
+        return currentAmount;
     }
     
     /**
@@ -528,6 +551,42 @@ contract DEXAggregatorRouter is AccessControl, ReentrancyGuard {
     function updateFeeRecipient(address newRecipient) external onlyRole(ADMIN_ROLE) {
         require(newRecipient != address(0), "Invalid recipient");
         feeRecipient = newRecipient;
+    }
+    
+    /**
+     * @dev Execute swap on a specific pool
+     */
+    function _executePoolSwap(
+        bytes32 poolId,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn
+    ) internal returns (uint256) {
+        LiquidityPool storage pool = liquidityPools[poolId];
+        require(pool.isActive, "Pool not active");
+        
+        // Get pool reserves
+        uint256 reserveIn = pool.token0 == tokenIn ? pool.reserve0 : pool.reserve1;
+        uint256 reserveOut = pool.token0 == tokenOut ? pool.reserve0 : pool.reserve1;
+        
+        // Calculate output amount using constant product formula (x * y = k)
+        // amountOut = (amountIn * reserveOut) / (reserveIn + amountIn)
+        uint256 amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
+        
+        // Apply fee (0.3% typical)
+        uint256 fee = (amountOut * 3) / 1000;
+        amountOut = amountOut - fee;
+        
+        // Update pool reserves
+        if (pool.token0 == tokenIn) {
+            pool.reserve0 += amountIn;
+            pool.reserve1 -= amountOut;
+        } else {
+            pool.reserve1 += amountIn;
+            pool.reserve0 -= amountOut;
+        }
+        
+        return amountOut;
     }
     
     /**

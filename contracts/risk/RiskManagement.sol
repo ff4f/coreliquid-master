@@ -388,8 +388,27 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         address[] memory positions = userPositions[user];
         uint256 liquidatedAmount = 0;
         for (uint256 i = 0; i < positions.length; i++) {
-            // Emergency liquidation logic
-            liquidatedAmount += 1000e18; // Placeholder amount
+            UserPosition storage position = positions[i];
+            
+            if (position.collateralAmount > 0) {
+                // Calculate liquidation amount based on position size and health factor
+                uint256 positionValue = (position.collateralAmount * getAssetPrice(position.collateralAsset)) / PRECISION;
+                uint256 debtValue = (position.debtAmount * getAssetPrice(position.debtAsset)) / PRECISION;
+                
+                // Liquidate up to 50% of collateral in emergency
+                uint256 maxLiquidation = position.collateralAmount / 2;
+                uint256 liquidationAmount = debtValue > positionValue ? maxLiquidation : 
+                    (debtValue * position.collateralAmount) / positionValue;
+                
+                if (liquidationAmount > 0) {
+                    position.collateralAmount -= liquidationAmount;
+                    liquidatedAmount += liquidationAmount;
+                    
+                    // Update debt proportionally
+                    uint256 debtReduction = (liquidationAmount * position.debtAmount) / (position.collateralAmount + liquidationAmount);
+                    position.debtAmount -= debtReduction;
+                }
+            }
         }
         
         emit EmergencyLiquidation(user, block.timestamp);
@@ -585,14 +604,48 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     }
 
     function _getUserCollateralAndDebt(address user) internal view returns (uint256 totalCollateral, uint256 totalDebt) {
-        // Calculate user's total collateral and debt
-        // This would integrate with lending/borrowing contracts
-        return (0, 0); // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            UserPosition storage position = positions[i];
+            
+            // Get current prices from oracle
+            uint256 collateralPrice = oracle.getPrice(position.collateralAsset);
+            uint256 debtPrice = oracle.getPrice(position.debtAsset);
+            
+            // Calculate values in USD
+            totalCollateral += (position.collateralAmount * collateralPrice) / PRECISION;
+            totalDebt += (position.debtAmount * debtPrice) / PRECISION;
+        }
+        
+        return (totalCollateral, totalDebt);
     }
 
     function _getWeightedLiquidationThreshold(address user) internal view returns (uint256) {
-        // Calculate weighted liquidation threshold based on user's collateral
-        return config.liquidationThreshold; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return config.liquidationThreshold;
+        
+        uint256 totalCollateralValue = 0;
+        uint256 weightedThreshold = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            UserPosition storage position = positions[i];
+            address asset = position.collateralAsset;
+            
+            uint256 price = oracle.getPrice(asset);
+            uint256 assetValue = (position.collateralAmount * price) / PRECISION;
+            totalCollateralValue += assetValue;
+            
+            // Get asset-specific liquidation threshold
+            uint256 assetThreshold = collateralData[asset].liquidationThreshold;
+            if (assetThreshold == 0) {
+                assetThreshold = config.liquidationThreshold; // Default threshold
+            }
+            
+            weightedThreshold += assetValue * assetThreshold;
+        }
+        
+        return totalCollateralValue > 0 ? weightedThreshold / totalCollateralValue : config.liquidationThreshold;
     }
 
     function _flagForLiquidation(address user, uint256 healthFactor) internal {
@@ -633,8 +686,25 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     }
 
     function _calculateExposureRatio(address user, address asset) internal view returns (uint256) {
-        // Calculate exposure ratio
-        return 0; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 assetExposure = 0;
+        uint256 totalExposure = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            UserPosition storage position = positions[i];
+            
+            uint256 collateralPrice = oracle.getPrice(position.collateralAsset);
+            uint256 positionValue = (position.collateralAmount * collateralPrice) / PRECISION;
+            totalExposure += positionValue;
+            
+            if (position.collateralAsset == asset) {
+                assetExposure += positionValue;
+            }
+        }
+        
+        return totalExposure > 0 ? (assetExposure * BASIS_POINTS) / totalExposure : 0;
     }
 
     function _createRiskAlert(address user, string memory message, AlertSeverity severity) internal {
@@ -654,8 +724,30 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         address user,
         StressTestScenario memory scenario
     ) internal view returns (uint256 valueBefore, uint256 valueAfter) {
-        // Simulate stress test scenario
-        return (0, 0); // Placeholder
+        // Calculate current portfolio value
+        UserPosition[] storage positions = userPositions[user];
+        valueBefore = 0;
+        valueAfter = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            UserPosition storage position = positions[i];
+            
+            // Current value
+            uint256 collateralPrice = oracle.getPrice(position.collateralAsset);
+            uint256 currentValue = (position.collateralAmount * collateralPrice) / PRECISION;
+            valueBefore += currentValue;
+            
+            // Stressed value (apply scenario stress factors)
+            uint256 stressedPrice = collateralPrice;
+            if (scenario.priceDropPercentage > 0) {
+                stressedPrice = (collateralPrice * (BASIS_POINTS - scenario.priceDropPercentage)) / BASIS_POINTS;
+            }
+            
+            uint256 stressedValue = (position.collateralAmount * stressedPrice) / PRECISION;
+            valueAfter += stressedValue;
+        }
+        
+        return (valueBefore, valueAfter);
     }
 
     function _calculateMaxDrawdown(uint256 valueBefore, uint256 valueAfter) internal pure returns (uint256) {
@@ -667,33 +759,162 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         address user,
         StressTestScenario memory scenario
     ) internal view returns (RiskMetrics memory) {
-        // Calculate stress test risk metrics
-        return riskMetrics[user]; // Placeholder
+        RiskMetrics memory stressMetrics = riskMetrics[user];
+        
+        // Apply stress scenario adjustments
+        uint256 stressMultiplier = 100 + scenario.priceDropPercentage;
+        
+        // Increase risk scores under stress
+        stressMetrics.concentrationRisk = (stressMetrics.concentrationRisk * stressMultiplier) / 100;
+        stressMetrics.liquidityRisk = (stressMetrics.liquidityRisk * stressMultiplier) / 100;
+        stressMetrics.marketRisk = (stressMetrics.marketRisk * stressMultiplier) / 100;
+        stressMetrics.creditRisk = (stressMetrics.creditRisk * stressMultiplier) / 100;
+        
+        // Cap at maximum values
+        if (stressMetrics.concentrationRisk > 1000) stressMetrics.concentrationRisk = 1000;
+        if (stressMetrics.liquidityRisk > 1000) stressMetrics.liquidityRisk = 1000;
+        if (stressMetrics.marketRisk > 1000) stressMetrics.marketRisk = 1000;
+        if (stressMetrics.creditRisk > 1000) stressMetrics.creditRisk = 1000;
+        
+        return stressMetrics;
     }
 
     function _calculateDiversificationScore(address user) internal view returns (uint256) {
-        // Calculate portfolio diversification score
-        return 500; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 totalValue = 0;
+        uint256 maxAssetValue = 0;
+        
+        // Calculate total portfolio value and find largest position
+        for (uint256 i = 0; i < positions.length; i++) {
+            uint256 price = oracle.getPrice(positions[i].collateralAsset);
+            uint256 assetValue = (positions[i].collateralAmount * price) / PRECISION;
+            totalValue += assetValue;
+            
+            if (assetValue > maxAssetValue) {
+                maxAssetValue = assetValue;
+            }
+        }
+        
+        if (totalValue == 0) return 0;
+        
+        // Diversification score: 1000 - (largest_position_percentage * 10)
+        uint256 concentrationPercentage = (maxAssetValue * BASIS_POINTS) / totalValue;
+        uint256 diversificationScore = concentrationPercentage > BASIS_POINTS ? 0 : 
+            BASIS_POINTS - concentrationPercentage;
+            
+        return (diversificationScore * 1000) / BASIS_POINTS; // Scale to 0-1000
     }
 
     function _calculateConcentrationRisk(address user) internal view returns (uint256) {
-        // Calculate concentration risk
-        return 300; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 totalValue = 0;
+        uint256[] memory assetValues = new uint256[](positions.length);
+        
+        // Calculate individual asset values
+        for (uint256 i = 0; i < positions.length; i++) {
+            uint256 price = oracle.getPrice(positions[i].collateralAsset);
+            assetValues[i] = (positions[i].collateralAmount * price) / PRECISION;
+            totalValue += assetValues[i];
+        }
+        
+        if (totalValue == 0) return 0;
+        
+        // Calculate Herfindahl-Hirschman Index (HHI) for concentration
+        uint256 hhi = 0;
+        for (uint256 i = 0; i < assetValues.length; i++) {
+            uint256 share = (assetValues[i] * BASIS_POINTS) / totalValue;
+            hhi += (share * share) / BASIS_POINTS;
+        }
+        
+        // Convert HHI to risk score (0-1000)
+        // HHI ranges from 1/n to 1, we scale to 0-1000
+        return (hhi * 1000) / BASIS_POINTS;
     }
 
     function _calculateLiquidityRisk(address user) internal view returns (uint256) {
-        // Calculate liquidity risk
-        return 200; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 totalValue = 0;
+        uint256 weightedLiquidityRisk = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            address asset = positions[i].collateralAsset;
+            uint256 price = oracle.getPrice(asset);
+            uint256 assetValue = (positions[i].collateralAmount * price) / PRECISION;
+            totalValue += assetValue;
+            
+            // Get asset liquidity risk from collateral data
+            uint256 assetLiquidityRisk = collateralData[asset].liquidityRisk;
+            if (assetLiquidityRisk == 0) {
+                // Default liquidity risk based on asset type
+                assetLiquidityRisk = 100; // 1% default
+            }
+            
+            weightedLiquidityRisk += assetValue * assetLiquidityRisk;
+        }
+        
+        if (totalValue == 0) return 0;
+        
+        return weightedLiquidityRisk / totalValue;
     }
 
     function _calculateMarketRisk(address user) internal view returns (uint256) {
-        // Calculate market risk
-        return 400; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 totalValue = 0;
+        uint256 weightedVolatility = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            address asset = positions[i].collateralAsset;
+            uint256 price = oracle.getPrice(asset);
+            uint256 assetValue = (positions[i].collateralAmount * price) / PRECISION;
+            totalValue += assetValue;
+            
+            // Get asset volatility from collateral data
+            uint256 assetVolatility = collateralData[asset].volatility;
+            if (assetVolatility == 0) {
+                // Default volatility based on asset type
+                assetVolatility = 300; // 3% default
+            }
+            
+            weightedVolatility += assetValue * assetVolatility;
+        }
+        
+        if (totalValue == 0) return 0;
+        
+        return weightedVolatility / totalValue;
     }
 
     function _calculateCreditRisk(address user) internal view returns (uint256) {
-        // Calculate credit risk
-        return 250; // Placeholder
+        UserPosition[] storage positions = userPositions[user];
+        if (positions.length == 0) return 0;
+        
+        uint256 totalDebtValue = 0;
+        uint256 totalCollateralValue = 0;
+        
+        for (uint256 i = 0; i < positions.length; i++) {
+            UserPosition storage position = positions[i];
+            
+            uint256 collateralPrice = oracle.getPrice(position.collateralAsset);
+            uint256 debtPrice = oracle.getPrice(position.debtAsset);
+            
+            totalCollateralValue += (position.collateralAmount * collateralPrice) / PRECISION;
+            totalDebtValue += (position.debtAmount * debtPrice) / PRECISION;
+        }
+        
+        if (totalCollateralValue == 0) return 1000; // Maximum risk if no collateral
+        
+        // Credit risk based on leverage ratio
+        uint256 leverageRatio = (totalDebtValue * BASIS_POINTS) / totalCollateralValue;
+        
+        // Scale leverage ratio to risk score (0-1000)
+        return leverageRatio > BASIS_POINTS ? 1000 : (leverageRatio * 1000) / BASIS_POINTS;
     }
 
     function _calculateOverallRiskScore(PortfolioRisk memory portfolio) internal pure returns (uint256) {
@@ -702,13 +923,31 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     }
 
     function _getAssetVolatility(address asset) internal view returns (uint256) {
-        // Get asset volatility from oracle or historical data
-        return 1000; // Placeholder: 10%
+        // Get asset volatility from collateral data or oracle
+        uint256 volatility = collateralData[asset].volatility;
+        if (volatility == 0) {
+            // Default volatility based on asset type
+            volatility = 1000; // 10% default
+        }
+        return volatility;
     }
 
     function _isHighVolatilityPeriod() internal view returns (bool) {
-        // Check if current period has high volatility
-        return false; // Placeholder
+        // Check if current period has high volatility by examining recent price movements
+        uint256 volatilityThreshold = 1500; // 15%
+        
+        // Check volatility of major assets
+        for (uint256 i = 0; i < allUsers.length && i < 5; i++) {
+            UserPosition[] storage positions = userPositions[allUsers[i]];
+            for (uint256 j = 0; j < positions.length && j < 3; j++) {
+                uint256 assetVolatility = _getAssetVolatility(positions[j].collateralAsset);
+                if (assetVolatility > volatilityThreshold) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 
     function _isInLiquidatablePositions(address user) internal view returns (bool) {

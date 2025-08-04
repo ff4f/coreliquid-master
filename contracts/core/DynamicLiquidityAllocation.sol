@@ -620,8 +620,11 @@ contract DynamicLiquidityAllocation is AccessControl, ReentrancyGuard {
         uint256 baseScore = _calculateAllocationScore(protocol);
         
         // Apply dynamic adjustments based on market conditions
-        // This would integrate with external price feeds and market data
-        uint256 marketMultiplier = 100; // Placeholder for market condition multiplier
+        uint256 marketMultiplier = _calculateMarketMultiplier(protocol);
+        
+        // Apply volatility adjustment
+        uint256 volatilityAdjustment = _calculateVolatilityAdjustment(protocol);
+        marketMultiplier = (marketMultiplier * volatilityAdjustment) / 100;
         
         return (baseScore * marketMultiplier) / 100;
     }
@@ -912,5 +915,43 @@ contract DynamicLiquidityAllocation is AccessControl, ReentrancyGuard {
         protocol.historicalAPY = protocol.currentAPY;
         protocol.currentAPY = newAPY;
         protocol.lastUpdate = block.timestamp;
+    }
+
+    /**
+     * @dev Calculate market condition multiplier
+     */
+    function _calculateMarketMultiplier(Protocol memory protocol) internal view returns (uint256) {
+        // Base multiplier
+        uint256 multiplier = 100;
+        
+        // Adjust based on protocol type and current market conditions
+        if (protocol.protocolType == ProtocolType.LENDING) {
+            // Higher weight during high demand periods
+            multiplier = protocol.currentAPY > protocol.historicalAPY ? 110 : 95;
+        } else if (protocol.protocolType == ProtocolType.DEX) {
+            // Adjust based on trading volume and liquidity
+            multiplier = protocol.liquidityScore > 70 ? 105 : 90;
+        } else if (protocol.protocolType == ProtocolType.STAKING) {
+            // More conservative during volatile periods
+            multiplier = protocol.riskScore < 30 ? 110 : 85;
+        }
+        
+        return multiplier;
+    }
+
+    /**
+     * @dev Calculate volatility adjustment
+     */
+    function _calculateVolatilityAdjustment(Protocol memory protocol) internal pure returns (uint256) {
+        // Adjust allocation based on protocol risk score
+        if (protocol.riskScore <= 20) {
+            return 110; // Low risk, increase allocation
+        } else if (protocol.riskScore <= 50) {
+            return 100; // Medium risk, neutral
+        } else if (protocol.riskScore <= 80) {
+            return 90;  // High risk, reduce allocation
+        } else {
+            return 75;  // Very high risk, significantly reduce
+        }
     }
 }
