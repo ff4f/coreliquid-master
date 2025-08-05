@@ -2,6 +2,7 @@
   "name": "corefluidx-defi-protocol",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@9.12.3",
   "description": "CoreFluidX - Unified Liquidity Protocol for Core Chain DeFi",
   "author": "CoreFluidX Team",
   "license": "MIT",
@@ -118,7 +119,7 @@
     "@nomicfoundation/hardhat-network-helpers": "^1.1.0",
     "@nomicfoundation/hardhat-verify": "^2.1.0",
     "@nomicfoundation/ignition-core": "^0.15.13",
-    "@nomiclabs/hardhat-ethers": "^2.2.3",
+
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "@types/chai": "^4.3.20",
