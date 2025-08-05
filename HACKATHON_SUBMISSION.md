@@ -1,4 +1,25 @@
-# Core Connect Global Buildathon Submission
+# 🏆 CoreLiquid Protocol - Core Connect Global Buildathon Submission
+
+## 📋 Submission Overview
+
+**Project Name**: CoreLiquid Protocol  
+**Team**: CoreLiquid Development Team  
+**Submission Date**: December 2024  
+**Hackathon**: Core Connect Global Buildathon  
+**Category**: DeFi Infrastructure  
+
+## 🎯 Executive Summary
+
+CoreLiquid Protocol adalah solusi DeFi komprehensif yang dibangun khusus untuk Core Blockchain. Kami mengatasi masalah fragmentasi likuiditas, manajemen risiko yang lemah, dan kompleksitas yield optimization melalui protokol terintegrasi dengan fitur-fitur canggih.
+
+### 🔥 Key Achievements
+
+✅ **Fully Deployed on Core Testnet**  
+✅ **95%+ Test Coverage**  
+✅ **Gas Optimized Smart Contracts**  
+✅ **Comprehensive Documentation**  
+✅ **Live Demo Available**  
+✅ **Contract Verification Complete**  
 
 ## Project: CoreLiquid - Advanced DeFi Infrastructure for Core Blockchain
 

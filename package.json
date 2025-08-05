@@ -52,7 +52,13 @@
     "hackathon:deploy": "node deploy-vercel.js",
     "hackathon:all": "npm run hackathon:setup && npm run hackathon:test",
     "demo:start": "npm run dev",
-    "demo:build": "npm run build && npm run start"
+    "demo:build": "npm run build && npm run start",
+    "vercel:setup": "node setup-vercel-deployment.js",
+    "vercel:check": "node check-deployment-readiness.js",
+    "vercel:prepare": "npm run vercel:check && npm run vercel:setup",
+    "deployment:check": "node check-deployment-readiness.js",
+    "deployment:setup": "node setup-vercel-deployment.js",
+    "deployment:ready": "npm run deployment:check && echo '✅ Ready for Vercel deployment!'"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
