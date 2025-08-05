@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../interfaces/IPriceOracle.sol";
+import "../interfaces/ipriceoracle.sol";
 
 /**
  * @title PriceOracle
@@ -24,23 +24,7 @@ contract PriceOracle is IPriceOracle, AccessControl, ReentrancyGuard, Pausable {
     uint256 public constant VOLATILITY_WINDOW = 24 hours;
     uint256 public constant MAX_ORACLE_SOURCES = 10;
 
-    // Structs
-    struct PriceData {
-        uint256 price;
-        uint256 timestamp;
-        uint256 confidence;
-        bool isActive;
-        uint256 volatility;
-        uint256 volume24h;
-    }
-
-    struct OracleSource {
-        address oracle;
-        uint256 weight;
-        bool isActive;
-        uint256 lastUpdate;
-        string name;
-    }
+    // Structs imported from IPriceOracle interface
 
     struct PriceHistory {
         uint256[] prices;
@@ -106,7 +90,7 @@ contract PriceOracle is IPriceOracle, AccessControl, ReentrancyGuard, Pausable {
         require(supportedAssets[asset], "Asset not supported");
         
         PriceData memory data = assetPrices[asset];
-        require(data.isActive, "Asset price not active");
+        require(data.isValid, "Asset price not active");
         require(block.timestamp - data.timestamp <= STALE_PRICE_THRESHOLD, "Price data stale");
         
         return (data.price, data.confidence);
@@ -138,9 +122,7 @@ contract PriceOracle is IPriceOracle, AccessControl, ReentrancyGuard, Pausable {
             price: price,
             timestamp: block.timestamp,
             confidence: _calculateConfidence(asset, price),
-            isActive: true,
-            volatility: _calculateVolatility(asset, price),
-            volume24h: marketData[asset].volume24h
+            isValid: true
         });
         
         // Update price history

@@ -7,13 +7,13 @@ import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
 // Import Core contracts
-import "../contracts/CoreLiquidProtocol.sol";
+import "../contracts/core/CoreLiquidProtocol.sol";
 import "../contracts/core/CoreNativeStaking.sol";
-import "../contracts/core/StCOREToken.sol";
+import "../contracts/staking/StCOREToken.sol";
 import "../contracts/core/CoreRevenueModel.sol";
-import "../contracts/core/UnifiedLiquidityPool.sol";
+import "../contracts/core/TrueUnifiedLiquidityLayer.sol";
 import "../contracts/UnifiedLPToken.sol";
-import "../contracts/deposit/DepositManager.sol";
+import "../contracts/utils/DepositManager.sol";
 import "../contracts/borrow/LendingMarket.sol";
 import "../contracts/common/RiskEngine.sol";
 import "./mocks/MockCoreBTCStaking.sol";
@@ -56,7 +56,7 @@ contract BaseTest is Test {
     CoreNativeStaking public coreNativeStaking;
     StCOREToken public stCoreToken;
     CoreRevenueModel public revenueModel;
-    UnifiedLiquidityPool public unifiedLiquidityPool;
+    TrueUnifiedLiquidityLayer public unifiedLiquidityPool;
     UnifiedLPToken public unifiedLPToken;
     DepositManager public depositManager;
     LendingMarket public lendingMarket;
@@ -156,7 +156,7 @@ contract BaseTest is Test {
         emit ContractDeployed("Core Native Staking", address(coreNativeStaking));
         
         // Deploy Unified Liquidity Pool
-        unifiedLiquidityPool = new UnifiedLiquidityPool(
+        unifiedLiquidityPool = new TrueUnifiedLiquidityLayer(
             address(0), // oracle placeholder
             address(0), // positionManager placeholder
             deployer

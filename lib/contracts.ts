@@ -52,8 +52,11 @@ const UNIFIED_LIQUIDITY_POOL_ABI = [
   'function getTotalValue() view returns (uint256)',
   'function getUtilizationRatio() view returns (uint256)',
   'function getAPR() view returns (uint256)',
+  'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address to) returns (uint256)',
+  'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'event Deposit(address indexed user, address indexed token, uint256 amount)',
   'event Withdraw(address indexed user, address indexed token, uint256 amount)',
+  'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
 ];
 
 // OptimizedTULL ABI
@@ -194,6 +197,8 @@ export class CoreFluidXContracts {
     this.initializeContracts();
   }
 
+
+
   private initializeContracts() {
     // Initialize all contracts
     this.contracts.coreLiquidToken = new Contract(
@@ -202,15 +207,9 @@ export class CoreFluidXContracts {
       this.signer
     );
 
-    this.contracts.coreLiquidStaking = new Contract(
-      CONTRACT_ADDRESSES.CORE_LIQUID_STAKING,
-      CORE_LIQUID_STAKING_ABI,
-      this.signer
-    );
-
-    this.contracts.coreLiquidPool = new Contract(
-      CONTRACT_ADDRESSES.CORE_LIQUID_POOL,
-      CORE_LIQUID_POOL_ABI,
+    this.contracts.btcToken = new Contract(
+      CONTRACT_ADDRESSES.BTC_TOKEN,
+      CORE_LIQUID_TOKEN_ABI, // Using same ABI for ERC20 tokens
       this.signer
     );
 
@@ -261,6 +260,12 @@ export class CoreFluidXContracts {
       RISK_ENGINE_ABI,
       this.signer
     );
+
+    this.contracts.coreLiquidPool = new Contract(
+      CONTRACT_ADDRESSES.CORE_LIQUID_POOL,
+      CORE_LIQUID_POOL_ABI,
+      this.signer
+    );
   }
 
   // Setup event listeners
@@ -305,16 +310,31 @@ export class CoreFluidXContracts {
 
   // Core Liquid Token operations
   async getTokenBalance(address: string): Promise<string> {
-    const balance = await this.contracts.coreLiquidToken.balanceOf(address);
-    return ethers.formatEther(balance);
+    if (!this.contracts.coreLiquidToken) {
+      console.warn('Core Liquid Token contract not available');
+      return '0';
+    }
+    try {
+      const balance = await this.contracts.coreLiquidToken.balanceOf(address);
+      return ethers.formatEther(balance);
+    } catch (error) {
+      console.error('Error getting token balance:', error);
+      return '0';
+    }
   }
 
   async approveToken(spender: string, amount: string): Promise<any> {
+    if (!this.contracts.coreLiquidToken) {
+      throw new Error('Core Liquid Token contract not available');
+    }
     const amountWei = ethers.parseEther(amount);
     return await this.contracts.coreLiquidToken.approve(spender, amountWei);
   }
 
   async transferToken(to: string, amount: string): Promise<any> {
+    if (!this.contracts.coreLiquidToken) {
+      throw new Error('Core Liquid Token contract not available');
+    }
     const amountWei = ethers.parseEther(amount);
     return await this.contracts.coreLiquidToken.transfer(to, amountWei);
   }
@@ -403,13 +423,23 @@ export class CoreFluidXContracts {
   }
 
   async getULPTotalValue(): Promise<string> {
-    const value = await this.contracts.unifiedLiquidityPool.getTotalValue();
-    return ethers.formatEther(value);
+    try {
+      const value = await this.contracts.unifiedLiquidityPool.getTotalValue();
+      return ethers.formatEther(value);
+    } catch (error) {
+      console.warn('Failed to get ULP total value:', error);
+      return '0';
+    }
   }
 
   async getULPAPR(): Promise<string> {
-    const apr = await this.contracts.unifiedLiquidityPool.getAPR();
-    return ethers.formatUnits(apr, 2); // Assuming APR is in basis points
+    try {
+      const apr = await this.contracts.unifiedLiquidityPool.getAPR();
+      return ethers.formatUnits(apr, 2); // Assuming APR is in basis points
+    } catch (error) {
+      console.warn('Failed to get ULP APR:', error);
+      return '0';
+    }
   }
 
   // Revenue operations
@@ -418,13 +448,23 @@ export class CoreFluidXContracts {
   }
 
   async getPendingRevenue(address: string): Promise<string> {
-    const revenue = await this.contracts.revenueModel.getPendingRevenue(address);
-    return ethers.formatEther(revenue);
+    try {
+      const revenue = await this.contracts.revenueModel.getPendingRevenue(address);
+      return ethers.formatEther(revenue);
+    } catch (error) {
+      console.warn('Failed to get pending revenue:', error);
+      return '0';
+    }
   }
 
   async getTotalRevenue(): Promise<string> {
-    const revenue = await this.contracts.revenueModel.getTotalRevenue();
-    return ethers.formatEther(revenue);
+    try {
+      const revenue = await this.contracts.revenueModel.getTotalRevenue();
+      return ethers.formatEther(revenue);
+    } catch (error) {
+      console.warn('Failed to get total revenue:', error);
+      return '0';
+    }
   }
 
   // Deposit Manager operations
@@ -455,15 +495,27 @@ export class CoreFluidXContracts {
   }
 
   async openCreditSale(asset: string, principal: string, recipient?: string): Promise<any> {
+    // Import getTokenAddress function
+    const { getTokenAddress } = await import('./token-data');
+    
+    // Convert token symbol to address if needed
+    const assetAddress = asset.startsWith('0x') ? asset : getTokenAddress(asset);
+    
     const principalWei = ethers.parseEther(principal);
     const recipientAddr = recipient || ethers.ZeroAddress;
-    return await this.contracts.creditManager.openCreditSale(asset, principalWei, recipientAddr);
+    return await this.contracts.creditManager.openCreditSale(assetAddress, principalWei, recipientAddr);
   }
 
   async payInstalment(asset: string, principalAmount: string, markupAmount: string): Promise<any> {
+    // Import getTokenAddress function
+    const { getTokenAddress } = await import('./token-data');
+    
+    // Convert token symbol to address if needed
+    const assetAddress = asset.startsWith('0x') ? asset : getTokenAddress(asset);
+    
     const principalWei = ethers.parseEther(principalAmount);
     const markupWei = ethers.parseEther(markupAmount);
-    return await this.contracts.creditManager.payInstalment(asset, principalWei, markupWei);
+    return await this.contracts.creditManager.payInstalment(assetAddress, principalWei, markupWei);
   }
 
   async getUserCreditAccount(user: string, asset: string): Promise<any> {
@@ -566,10 +618,20 @@ export class CoreFluidXContracts {
   async getULPData(address: string): Promise<any> {
     try {
       const totalValue = await this.getULPTotalValue();
-      const utilizationRatio = await this.contracts.unifiedLiquidityPool.getUtilizationRatio();
+      
+      let utilizationRatio = 0.78; // Default fallback
+      try {
+        const ratio = await this.contracts.unifiedLiquidityPool.getUtilizationRatio();
+        if (ratio && ratio !== '0x') {
+          utilizationRatio = parseFloat(ethers.formatUnits(ratio, 4)) / 10000;
+        }
+      } catch (ratioError) {
+        console.warn('Could not fetch utilization ratio, using default:', ratioError);
+      }
+      
       return {
         totalValue: parseFloat(totalValue),
-        utilizationRatio: parseFloat(ethers.formatUnits(utilizationRatio, 4)) / 10000,
+        utilizationRatio,
         capitalEfficiency: 0.85,
         activePools: 8
       };
@@ -659,8 +721,8 @@ export class CoreFluidXContracts {
   }
 
   // Get contract instances for direct access
-  getContract(name: string): Contract | undefined {
-    return this.contracts[name];
+  getContract(name: string): Contract | null {
+    return this.contracts[name] || null;
   }
 
   // SimpleTULL operations
@@ -793,12 +855,21 @@ export class CoreFluidXContracts {
 
    // Risk Engine operations
    async getUserRiskProfile(user: string): Promise<{ healthFactor: string; collateral: string; borrow: string }> {
-     const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
-     return {
-       healthFactor: ethers.formatUnits(hf, 18),
-       collateral: ethers.formatEther(col),
-       borrow: ethers.formatEther(bor),
-     };
+     try {
+       const [hf, col, bor] = await this.contracts.riskEngine.calculateUserRiskProfile(user);
+       return {
+         healthFactor: ethers.formatUnits(hf, 18),
+         collateral: ethers.formatEther(col),
+         borrow: ethers.formatEther(bor),
+       };
+     } catch (error) {
+       console.warn('Failed to get user risk profile:', error);
+       return {
+         healthFactor: '0',
+         collateral: '0',
+         borrow: '0',
+       };
+     }
    }
 
    async isLiquidatable(user: string): Promise<boolean> {
@@ -813,6 +884,74 @@ export class CoreFluidXContracts {
      const profile = await this.getUserRiskProfile(address);
      return profile.healthFactor;
    }
+
+  // Swap functions
+  async executeSwap(tokenIn: string, tokenOut: string, amountIn: string, minAmountOut: string, recipient?: string): Promise<any> {
+    try {
+      const { getTokenAddress } = await import('./token-data');
+      
+      // Convert token symbols to addresses if needed
+      const tokenInAddress = tokenIn.startsWith('0x') ? tokenIn : getTokenAddress(tokenIn);
+      const tokenOutAddress = tokenOut.startsWith('0x') ? tokenOut : getTokenAddress(tokenOut);
+      const recipientAddress = recipient || await this.signer.getAddress();
+      
+      // Convert amounts to wei
+      const amountInWei = ethers.parseEther(amountIn);
+      const minAmountOutWei = ethers.parseEther(minAmountOut);
+      
+      // Execute swap through unified liquidity pool
+      const tx = await this.contracts.unifiedLiquidityPool.swap(
+        tokenInAddress,
+        tokenOutAddress,
+        amountInWei,
+        minAmountOutWei,
+        recipientAddress
+      );
+      
+      return tx;
+    } catch (error) {
+      console.error('Error executing swap:', error);
+      throw error;
+    }
+  }
+
+  async getSwapQuote(tokenIn: string, tokenOut: string, amountIn: string): Promise<{ amountOut: string; fee: string }> {
+    try {
+      const { getTokenAddress } = await import('./token-data');
+      
+      // Convert token symbols to addresses if needed
+      const tokenInAddress = tokenIn.startsWith('0x') ? tokenIn : getTokenAddress(tokenIn);
+      const tokenOutAddress = tokenOut.startsWith('0x') ? tokenOut : getTokenAddress(tokenOut);
+      
+      // Convert amount to wei
+      const amountInWei = ethers.parseEther(amountIn);
+      
+      // Get quote from contract
+      const [amountOut, fee] = await this.contracts.unifiedLiquidityPool.getSwapQuote(
+        tokenInAddress,
+        tokenOutAddress,
+        amountInWei
+      );
+      
+      return {
+        amountOut: ethers.formatEther(amountOut),
+        fee: ethers.formatEther(fee)
+      };
+    } catch (error) {
+      console.error('Error getting swap quote:', error);
+      // Return fallback calculation
+      const fromTokenData = await import('./token-data').then(m => m.getTokenData(tokenIn));
+      const toTokenData = await import('./token-data').then(m => m.getTokenData(tokenOut));
+      const fromValueUSD = parseFloat(amountIn) * fromTokenData.price;
+      const outputAmount = fromValueUSD / toTokenData.price;
+      const fee = parseFloat(amountIn) * 0.003; // 0.3% fee
+      
+      return {
+        amountOut: (outputAmount * 0.997).toFixed(6), // Apply 0.3% fee
+        fee: fee.toFixed(6)
+      };
+    }
+  }
 
   // Get all contract addresses
   getContractAddresses() {

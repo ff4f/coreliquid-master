@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title FeeSpreadModel
@@ -33,7 +33,7 @@ contract FeeSpreadModel is Ownable, ReentrancyGuard {
     mapping(address => bool) public supportedAssets;
     address[] public assetList;
     
-    constructor(uint256 _globalBaseFeeSpread) {
+    constructor(uint256 _globalBaseFeeSpread) Ownable(msg.sender) {
         require(_globalBaseFeeSpread <= MAX_FEE_SPREAD, "Fee spread too high");
         globalBaseFeeSpread = _globalBaseFeeSpread;
     }

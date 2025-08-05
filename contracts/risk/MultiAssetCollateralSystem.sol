@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
+interface IPriceOracle {
+    function getPrice(address asset) external view returns (uint256);
+}
+
 /**
  * @title MultiAssetCollateralSystem
  * @dev Advanced multi-asset collateral management system with cross-collateral support
@@ -143,7 +147,17 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
     
     // Asset tracking
     address[] public allCollateralAssets;
+    address[] public allUsers;
     uint256 public liquidationCounter;
+    
+    // User position tracking
+    mapping(address => CollateralPosition) public collateralPositions;
+    
+    struct CollateralPosition {
+        address[] collateralAssets;
+        mapping(address => uint256) collateralBalances;
+        uint256 totalBorrowValue;
+    }
     
     // Global parameters
     uint256 public globalCollateralCap = 1000000000 * 1e18; // $1B cap
@@ -297,7 +311,13 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
         
         // Update user position
         UserPosition storage position = userPositions[msg.sender];
-        position.user = msg.sender;
+        
+        // Add user to allUsers array if first time depositing
+        if (position.user == address(0)) {
+            position.user = msg.sender;
+            allUsers.push(msg.sender);
+        }
+        
         position.collateralBalances[asset] += amount;
         
         // Update collateral supply
@@ -467,35 +487,35 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
         UserPosition storage position = userPositions[user];
         
         // Calculate total collateral value
-        uint256 totalCollateralValue = 0;
+        uint256 _totalCollateralValue = 0;
         for (uint256 i = 0; i < allCollateralAssets.length; i++) {
             address asset = allCollateralAssets[i];
             uint256 balance = position.collateralBalances[asset];
             if (balance > 0) {
                 uint256 assetValue = _calculateAssetValue(asset, balance);
-                totalCollateralValue += assetValue;
+                _totalCollateralValue += assetValue;
             }
         }
         
         // Calculate total borrow value from all borrowed assets
-        uint256 totalBorrowValue = _calculateTotalBorrowValue(user);
+        uint256 _totalBorrowValue = _calculateTotalBorrowValue(user);
         
         // Calculate health factor
-        uint256 healthFactor = _calculateHealthFactor(totalCollateralValue, totalBorrowValue);
+        uint256 healthFactor = _calculateHealthFactor(_totalCollateralValue, _totalBorrowValue);
         
         // Calculate risk score
         uint256 riskScore = _calculateRiskScore(user);
         
         // Update position
         uint256 oldHealthFactor = position.healthFactor;
-        position.totalCollateralValue = totalCollateralValue;
+        position.totalCollateralValue = _totalCollateralValue;
         position.healthFactor = healthFactor;
         position.riskScore = riskScore;
         position.lastUpdate = block.timestamp;
         
         // Update position status
         PositionStatus oldStatus = position.status;
-        if (totalBorrowValue == 0) {
+        if (_totalBorrowValue == 0) {
             position.status = PositionStatus.HEALTHY;
         } else if (healthFactor >= MIN_COLLATERAL_RATIO) {
             position.status = PositionStatus.HEALTHY;
@@ -535,14 +555,14 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
      * @dev Calculate health factor
      */
     function _calculateHealthFactor(
-        uint256 totalCollateralValue,
-        uint256 totalBorrowValue
+        uint256 _totalCollateralValue,
+        uint256 _totalBorrowValue
     ) internal pure returns (uint256) {
-        if (totalBorrowValue == 0) {
+        if (_totalBorrowValue == 0) {
             return type(uint256).max; // Infinite health factor
         }
         
-        return (totalCollateralValue * BASIS_POINTS) / totalBorrowValue;
+        return (_totalCollateralValue * BASIS_POINTS) / _totalBorrowValue;
     }
     
     /**
@@ -664,13 +684,15 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
         // Iterate through all user positions to calculate global metrics
         for (uint256 i = 0; i < allUsers.length; i++) {
             address user = allUsers[i];
-            CollateralPosition storage position = collateralPositions[user];
+            UserPosition storage position = userPositions[user];
             
             // Sum collateral values
-            for (uint256 j = 0; j < position.collateralAssets.length; j++) {
-                address asset = position.collateralAssets[j];
+            for (uint256 j = 0; j < allCollateralAssets.length; j++) {
+                address asset = allCollateralAssets[j];
                 uint256 balance = position.collateralBalances[asset];
-                totalCollateral += _calculateAssetValue(asset, balance);
+                if (balance > 0) {
+                    totalCollateral += _calculateAssetValue(asset, balance);
+                }
             }
             
             // Sum borrow values
@@ -694,8 +716,8 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
         external 
         view 
         returns (
-            uint256 totalCollateralValue,
-            uint256 totalBorrowValue,
+            uint256 userTotalCollateralValue,
+            uint256 userTotalBorrowValue,
             uint256 healthFactor,
             uint256 riskScore,
             PositionStatus status
@@ -854,7 +876,7 @@ contract MultiAssetCollateralSystem is AccessControl, ReentrancyGuard {
      * @dev Calculate total borrow value for a user
      */
     function _calculateTotalBorrowValue(address user) internal view returns (uint256) {
-        CollateralPosition storage position = collateralPositions[user];
+        UserPosition storage position = userPositions[user];
         
         // In a real implementation, this would integrate with lending protocols
         // to get actual borrowed amounts and calculate their USD value

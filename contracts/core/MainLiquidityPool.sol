@@ -242,7 +242,8 @@ contract MainLiquidityPool is AccessControl, ReentrancyGuard, Pausable {
         require(amountOut >= minAmountOut, "UnifiedLiquidityPool: insufficient output amount");
         require(assets[tokenOut].balance >= amountOut, "UnifiedLiquidityPool: insufficient pool balance");
         
-        // Input tokens received without transfer
+        // Transfer input tokens from user to contract
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         
         // Update balances
         assets[tokenIn].balance += amountIn;

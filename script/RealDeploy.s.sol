@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import "../lib/forge-std/src/Script.sol";
 import "../lib/forge-std/src/console.sol";
-import "../contracts/StCOREToken.sol";
+import "../contracts/staking/StCOREToken.sol";
 
 contract RealDeployScript is Script {
     function run() external {
@@ -13,9 +13,9 @@ contract RealDeployScript is Script {
         
         // Deploy StCOREToken with constructor parameters
         StCOREToken stCoreToken = new StCOREToken(
-            "Staked CORE",
-            "stCORE",
-            address(0) // No staking contract for now
+            address(0x1), // Mock CORE token address
+            address(0x2), // Mock treasury address
+            address(0x3)  // Mock staking manager address
         );
         
         console.log("StCOREToken deployed at:", address(stCoreToken));

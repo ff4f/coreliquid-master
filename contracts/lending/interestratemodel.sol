@@ -2,7 +2,6 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -11,7 +10,6 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
  * @notice Modified for CoreFluid compliance - all interest rates return 0
  */
 contract InterestRateModel is AccessControl {
-    using SafeMath for uint256;
     using Math for uint256;
 
     bytes32 public constant RATE_ADMIN_ROLE = keccak256("RATE_ADMIN_ROLE");
@@ -167,7 +165,7 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
         
         // Apply emergency multiplier if in emergency mode
         if (emergencyMode) {
-            borrowRate = borrowRate.mul(emergencyRateMultiplier).div(PRECISION);
+            borrowRate = borrowRate * emergencyRateMultiplier / PRECISION;
         }
         
         return borrowRate;
@@ -199,8 +197,8 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
         borrowRate = _applyRiskAdjustments(asset, borrowRate);
         
         // Calculate supply rate: borrowRate * utilizationRate * (1 - reserveFactor)
-        uint256 rateToPool = borrowRate.mul(BASIS_POINTS.sub(model.reserveFactor)).div(BASIS_POINTS);
-        supplyRate = rateToPool.mul(utilizationRate).div(BASIS_POINTS);
+        uint256 rateToPool = borrowRate * (BASIS_POINTS - model.reserveFactor) / BASIS_POINTS;
+        supplyRate = rateToPool * utilizationRate / BASIS_POINTS;
         
         return supplyRate;
     }
@@ -225,8 +223,8 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
         borrowRate = _applyRiskAdjustments(asset, borrowRate);
         
         RateModel memory model = rateModels[asset];
-        uint256 rateToPool = borrowRate.mul(BASIS_POINTS.sub(model.reserveFactor)).div(BASIS_POINTS);
-        uint256 supplyRate = rateToPool.mul(utilizationRate).div(BASIS_POINTS);
+        uint256 rateToPool = borrowRate * (BASIS_POINTS - model.reserveFactor) / BASIS_POINTS;
+        uint256 supplyRate = rateToPool * utilizationRate / BASIS_POINTS;
         
         marketRates[asset] = MarketRates({
             supplyRate: supplyRate,
@@ -248,10 +246,10 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
     ) internal pure returns (uint256) {
         if (totalSupply == 0) return 0;
         
-        uint256 totalCash = totalSupply.sub(totalBorrows).add(totalReserves);
-        if (totalCash.add(totalBorrows) == 0) return 0;
+        uint256 totalCash = totalSupply - totalBorrows + totalReserves;
+        if (totalCash + totalBorrows == 0) return 0;
         
-        return totalBorrows.mul(BASIS_POINTS).div(totalCash.add(totalBorrows));
+        return totalBorrows * BASIS_POINTS / (totalCash + totalBorrows);
     }
 
     /**
@@ -262,13 +260,13 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
         
         if (utilizationRate <= model.optimalUtilization) {
             // Below optimal: baseRate + (utilizationRate * multiplier / optimalUtilization)
-            uint256 normalRate = utilizationRate.mul(model.multiplier).div(model.optimalUtilization);
-            return model.baseRate.add(normalRate);
+            uint256 normalRate = utilizationRate * model.multiplier / model.optimalUtilization;
+            return model.baseRate + normalRate;
         } else {
             // Above optimal: baseRate + multiplier + ((utilizationRate - optimalUtilization) * jumpMultiplier / (1 - optimalUtilization))
-            uint256 excessUtilization = utilizationRate.sub(model.optimalUtilization);
-            uint256 excessRate = excessUtilization.mul(model.jumpMultiplier).div(BASIS_POINTS.sub(model.optimalUtilization));
-            return model.baseRate.add(model.multiplier).add(excessRate);
+            uint256 excessUtilization = utilizationRate - model.optimalUtilization;
+            uint256 excessRate = excessUtilization * model.jumpMultiplier / (BASIS_POINTS - model.optimalUtilization);
+            return model.baseRate + model.multiplier + excessRate;
         }
     }
 
@@ -281,25 +279,25 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
         uint256 adjustedRate = baseRate;
         
         // Add risk premium
-        adjustedRate = adjustedRate.add(risk.riskPremium);
+        adjustedRate = adjustedRate + risk.riskPremium;
         
         // Apply volatility factor
         if (risk.volatilityFactor > PRECISION) {
-            adjustedRate = adjustedRate.mul(risk.volatilityFactor).div(PRECISION);
+            adjustedRate = adjustedRate * risk.volatilityFactor / PRECISION;
         }
         
         // Add liquidity risk
-        adjustedRate = adjustedRate.add(risk.liquidityRisk);
+        adjustedRate = adjustedRate + risk.liquidityRisk;
         
         // Add credit risk
-        adjustedRate = adjustedRate.add(risk.creditRisk);
+        adjustedRate = adjustedRate + risk.creditRisk;
         
         // Apply global risk multiplier
-        adjustedRate = adjustedRate.mul(globalRiskMultiplier).div(PRECISION);
+        adjustedRate = adjustedRate * globalRiskMultiplier / PRECISION;
         
         // High risk asset additional premium
         if (risk.isHighRisk) {
-            adjustedRate = adjustedRate.mul(120).div(100); // 20% additional premium
+            adjustedRate = adjustedRate * 120 / 100; // 20% additional premium
         }
         
         return adjustedRate;
@@ -310,7 +308,7 @@ bool public coreFluidMode = true; // Always return 0 for interest rates
      * @param multiplier New global risk multiplier
      */
     function setGlobalRiskMultiplier(uint256 multiplier) external onlyRole(RISK_MANAGER_ROLE) {
-        require(multiplier >= PRECISION.div(2) && multiplier <= PRECISION.mul(3), "Invalid multiplier");
+        require(multiplier >= PRECISION / 2 && multiplier <= PRECISION * 3, "Invalid multiplier");
         globalRiskMultiplier = multiplier;
         emit GlobalRiskMultiplierUpdated(multiplier);
     }

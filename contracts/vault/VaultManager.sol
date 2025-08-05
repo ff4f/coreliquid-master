@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./VaultStrategyBase.sol";
+import "./vaultstrategybase.sol";
 
 /**
  * @title VaultManager
@@ -357,7 +357,7 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
             }
             
             uint256 targetAmount = (currentTotalAssets * strategyInfo.allocation) / BASIS_POINTS;
-            uint256 currentAmount = VaultStrategyBase(strategy).balanceOf();
+            uint256 currentAmount = VaultStrategyBase(strategy).totalAssets();
             
             if (_shouldRebalance(currentAmount, targetAmount)) {
                 if (currentAmount > targetAmount) {
@@ -469,7 +469,7 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
                 continue;
             }
             
-            uint256 strategyBalance = VaultStrategyBase(strategy).balanceOf();
+            uint256 strategyBalance = VaultStrategyBase(strategy).totalAssets();
             uint256 withdrawAmount = Math.min(remainingAmount, strategyBalance);
             
             if (withdrawAmount > 0) {
@@ -489,12 +489,12 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
     }
     
     function _withdrawFromStrategy(address strategy, uint256 amount) internal {
-        uint256 strategyBalance = VaultStrategyBase(strategy).balanceOf();
+        uint256 strategyBalance = VaultStrategyBase(strategy).totalAssets();
         uint256 withdrawAmount = Math.min(amount, strategyBalance);
         
         if (withdrawAmount > 0) {
             // Calculate shares to withdraw (simplified)
-            uint256 shares = (withdrawAmount * VaultStrategyBase(strategy).totalShares()) / strategyBalance;
+            uint256 shares = (withdrawAmount * VaultStrategyBase(strategy).getStrategyInfo().totalShares) / strategyBalance;
             VaultStrategyBase(strategy).withdraw(shares);
             
             strategies[strategy].totalWithdrawn += withdrawAmount;
@@ -508,7 +508,7 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
         uint256 oldAllocation,
         uint256 newAllocation
     ) internal {
-        uint256 currentBalance = VaultStrategyBase(strategy).balanceOf();
+        uint256 currentBalance = VaultStrategyBase(strategy).totalAssets();
         uint256 targetBalance = (totalAssets * newAllocation) / BASIS_POINTS;
         
         if (currentBalance > targetBalance) {
@@ -545,7 +545,7 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < strategiesCount; i++) {
             address strategy = strategyList[i];
             if (strategies[strategy].isActive) {
-                total += VaultStrategyBase(strategy).balanceOf();
+                total += VaultStrategyBase(strategy).totalAssets();
             }
         }
         
@@ -575,7 +575,7 @@ contract VaultManager is AccessControl, ReentrancyGuard, Pausable {
     }
     
     function getStrategyBalance(address strategy) external view returns (uint256) {
-        return VaultStrategyBase(strategy).balanceOf();
+        return VaultStrategyBase(strategy).totalAssets();
     }
     
     function getRebalanceHistory(uint256 limit) external view returns (RebalanceData[] memory) {

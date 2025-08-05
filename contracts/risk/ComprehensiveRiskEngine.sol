@@ -5,6 +5,17 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
+interface IAccountingSystem {
+    function getUserCollateralAssets(address user) external view returns (address[] memory);
+    function getUserDebtAssets(address user) external view returns (address[] memory);
+    function getUserCollateralBalance(address user, address asset) external view returns (uint256);
+    function getUserDebtBalance(address user, address asset) external view returns (uint256);
+}
+
+interface IPriceOracle {
+    function getPrice(address asset) external view returns (uint256);
+}
+
 /**
  * @title ComprehensiveRiskEngine
  * @dev Advanced risk management system with real-time monitoring and dynamic adjustments
@@ -140,6 +151,20 @@ contract ComprehensiveRiskEngine is AccessControl, ReentrancyGuard {
     bool public emergencyMode;
     bool public liquidationsPaused;
     bool public borrowingPaused;
+    
+    // External contracts
+    IAccountingSystem public accountingSystem;
+    IPriceOracle public priceOracle;
+    
+    // Additional mappings
+    mapping(address => AssetRiskConfig) public assetRiskConfigs;
+    
+    struct AssetRiskConfig {
+        uint256 liquidationThreshold;
+        uint256 liquidationBonus;
+        uint256 maxLTV;
+        bool isActive;
+    }
     
     event RiskParametersUpdated(address indexed asset, uint256 liquidationThreshold, uint256 maxLTV);
     event RiskAlertTriggered(uint256 indexed alertId, AlertType alertType, address indexed user, uint256 severity);
@@ -542,5 +567,46 @@ contract ComprehensiveRiskEngine is AccessControl, ReentrancyGuard {
         globalRiskMultiplier = newRiskMultiplier;
         systemUtilizationCap = newUtilizationCap;
         emergencyLiquidationThreshold = newEmergencyThreshold;
+    }
+    
+    /**
+     * @dev Calculate concentration risk
+     */
+    function _calculateConcentrationRisk(
+        address user,
+        address[] memory assets,
+        uint256 totalValue
+    ) internal pure returns (uint256) {
+        if (totalValue == 0) return 0;
+        
+        uint256 maxAssetValue = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            // This would calculate individual asset values
+            // For now, return a simple calculation
+        }
+        
+        return (maxAssetValue * BASIS_POINTS) / totalValue;
+    }
+    
+    /**
+     * @dev Apply stress to collateral
+     */
+    function _applyStressToCollateral(
+        address user,
+        StressTestScenario storage scenario
+    ) internal view returns (uint256) {
+        // Simplified stress test calculation
+        return 0;
+    }
+    
+    /**
+     * @dev Apply stress to debt
+     */
+    function _applyStressToDebt(
+        address user,
+        StressTestScenario storage scenario
+    ) internal view returns (uint256) {
+        // Simplified stress test calculation
+        return 0;
     }
 }

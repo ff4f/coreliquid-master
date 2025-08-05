@@ -15,7 +15,7 @@ import "../interfaces/IOracle.sol";
  * @dev Comprehensive risk management system for CoreLiquid Protocol
  * @author CoreLiquid Protocol
  */
-abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGuard, Pausable {
+contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using Math for uint256;
 
@@ -38,6 +38,179 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     // Oracle interface
     IOracle public immutable oracle;
 
+    // Enums
+    enum RiskType {
+        COLLATERAL,
+        DEBT,
+        LIQUIDITY,
+        CONCENTRATION,
+        VOLATILITY,
+        CORRELATION
+    }
+    
+    enum ExposureType {
+        INCREASE,
+        DECREASE,
+        LIQUIDATION,
+        TRANSFER
+    }
+    
+    enum AlertSeverity {
+        LOW,
+        MEDIUM,
+        HIGH,
+        CRITICAL,
+        EMERGENCY
+    }
+    
+    enum RiskLevel {
+        LOW,
+        MEDIUM,
+        HIGH,
+        CRITICAL,
+        EMERGENCY
+    }
+
+    // Struct definitions
+    struct RiskAssessment {
+        uint256 riskScore;
+        uint256 healthFactor;
+        uint256 liquidationThreshold;
+        bool isAtRisk;
+        string riskCategory;
+        uint256 timestamp;
+    }
+    
+    struct StressTestResults {
+        uint256 testId;
+        uint256 totalLoss;
+        uint256 maxAssetLoss;
+        bool liquidationTriggered;
+        uint256 recoveryTime;
+        uint256 timestamp;
+    }
+    
+    struct SystemRiskMetrics {
+        uint256 totalUsers;
+        uint256 highRiskUsers;
+        uint256 liquidatablePositions;
+        uint256 totalRiskAssessments;
+        uint256 totalLiquidations;
+        uint256 totalStressTests;
+        uint256 averageRiskScore;
+        uint256 systemHealthFactor;
+    }
+
+    struct HealthFactor {
+        address user;
+        uint256 currentHealthFactor;
+        uint256 lastUpdate;
+        bool isHealthy;
+    }
+    
+    struct RiskAlertData {
+        address user;
+        string message;
+        uint256 severity;
+        uint256 timestamp;
+        bool isResolved;
+    }
+    
+    struct LiquidationData {
+        address user;
+        address asset;
+        uint256 debtToCover;
+        uint256 collateralToLiquidate;
+        uint256 liquidationBonus;
+        uint256 timestamp;
+        bool completed;
+    }
+    
+    struct ExposureData {
+        uint256 totalExposure;
+        uint256 maxExposure;
+        uint256 utilizationRatio;
+        uint256 lastUpdate;
+    }
+    
+    struct RiskLimit {
+        uint256 maxSingleExposure;
+        uint256 maxTotalExposure;
+        uint256 maxVolatility;
+        uint256 minLiquidity;
+        uint256 maxUtilization;
+    }
+    
+    struct CollateralData {
+        uint256 totalCollateral;
+        uint256 availableCollateral;
+        uint256 lockedCollateral;
+        uint256 collateralRatio;
+        uint256 lastUpdate;
+    }
+    
+    struct PortfolioRisk {
+        uint256 totalRisk;
+        uint256 concentrationRisk;
+        uint256 diversificationScore;
+        uint256 volatilityRisk;
+        uint256 lastCalculated;
+    }
+    
+    struct RiskConfig {
+        uint256 maxLeverage;
+        uint256 liquidationThreshold;
+        uint256 healthFactorThreshold;
+        uint256 maxConcentration;
+        uint256 volatilityThreshold;
+        bool emergencyMode;
+    }
+    
+    struct StressTestScenario {
+        uint256 scenarioId;
+        string name;
+        uint256 priceShock;
+        uint256 liquidityShock;
+        uint256 demandShock;
+        uint256 expectedLiquidations;
+        uint256 expectedLosses;
+        bool isActive;
+    }
+    
+    struct UserPosition {
+        address asset;
+        uint256 amount;
+        uint256 value;
+        uint256 riskWeight;
+        uint256 lastUpdate;
+    }
+
+    // Events
+    event RiskAssessmentCompleted(address indexed user, address indexed asset, uint256 riskScore, RiskType riskType, uint256 timestamp);
+    event HealthFactorCalculated(address indexed user, uint256 healthFactor, uint256 timestamp);
+    event PositionLiquidated(address indexed user, address indexed asset, uint256 amount, uint256 liquidationBonus, uint256 timestamp);
+    event ExposureUpdated(address indexed user, address indexed asset, uint256 amount, ExposureType exposureType, uint256 timestamp);
+    event StressTestCompleted(bytes32 indexed testId, address indexed user, string scenarioName, bool passed, uint256 timestamp);
+    event RiskLimitSet(address indexed user, address indexed asset, uint256 maxExposure, uint256 maxLeverage, uint256 timestamp);
+    event CollateralRiskUpdated(address indexed asset, uint256 liquidationThreshold, uint256 liquidationBonus, uint256 riskWeight, uint256 timestamp);
+    event PortfolioRiskCalculated(address indexed user, uint256 overallRiskScore, uint256 timestamp);
+    event RiskAlertResolved(address indexed user, address indexed resolver, uint256 timestamp);
+    event EmergencyLiquidationTriggered(address indexed user, address indexed asset, uint256 amount, uint256 timestamp);
+    event RiskParametersUpdated(string parameter, uint256 oldValue, uint256 newValue, uint256 timestamp);
+    event SystemRiskLevelChanged(RiskLevel oldLevel, RiskLevel newLevel, uint256 timestamp);
+    event UserRiskProfileUpdated(address indexed user, uint256 riskScore, RiskLevel riskLevel, uint256 timestamp);
+    event RiskAssessed(address indexed user, address indexed asset, uint256 amount, uint256 riskScore, RiskType riskType, uint256 timestamp);
+    event EmergencyLiquidation(address indexed user, uint256 timestamp);
+    event EmergencyModeEnabled(uint256 timestamp);
+    event EmergencyModeDisabled(uint256 timestamp);
+    event RiskConfigUpdated(uint256 timestamp);
+    event RiskAlertCreated(address indexed user, string message, uint256 severity, uint256 timestamp);
+    
+    // Functions
+    function getAssetPrice(address asset) internal view returns (uint256) {
+        return oracle.getPrice(asset);
+    }
+
     // Storage mappings
     mapping(address => RiskProfile) public riskProfiles;
     mapping(address => HealthFactor) public healthFactors;
@@ -48,7 +221,7 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     mapping(address => RiskLimit) public riskLimits;
     mapping(address => CollateralData) public collateralData;
     mapping(address => PortfolioRisk) public portfolioRisks;
-    mapping(address => RiskAlert) public riskAlerts;
+    mapping(address => RiskAlertData) public riskAlerts;
     mapping(address => address[]) public userPositions;
     mapping(address => bytes32[]) public userStressTests;
     
@@ -73,6 +246,10 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     uint256 public lastGlobalRiskUpdate;
     mapping(address => uint256) public lastRiskUpdate;
     mapping(address => bool) public isHighRisk;
+    mapping(address => RiskLimits) public userRiskLimits;
+    
+    // Global metrics
+    SystemRiskMetrics public globalMetrics;
 
     constructor(
         address _oracle,
@@ -368,7 +545,7 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     function resolveRiskAlert(
         address user
     ) external onlyRole(RISK_MANAGER_ROLE) {
-        RiskAlert storage alert = riskAlerts[user];
+        RiskAlertData storage alert = riskAlerts[user];
         require(alert.isActive, "No active alert");
         
         alert.isActive = false;
@@ -483,7 +660,7 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         return portfolioRisks[user];
     }
 
-    function getRiskAlert(address user) external view returns (RiskAlert memory) {
+    function getRiskAlert(address user) external view returns (RiskAlertData memory) {
         return riskAlerts[user];
     }
 
@@ -520,11 +697,314 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         });
     }
 
+    // Implementation of missing interface functions
+    function setRiskParameter(string calldata parameter, uint256 value) external override onlyRole(RISK_MANAGER_ROLE) {
+        riskParameters[parameter] = value;
+        emit RiskParametersUpdated(address(0), value, block.timestamp);
+    }
+    
+    function getRiskParameter(string calldata parameter) external view override returns (uint256 value) {
+        return riskParameters[parameter];
+    }
+    
+    function triggerRiskAlert(address asset, string calldata alertType, uint256 severity) external override onlyRole(RISK_MANAGER_ROLE) {
+        AlertSeverity alertSeverity = AlertSeverity.LOW;
+        if (severity >= 80) alertSeverity = AlertSeverity.CRITICAL;
+        else if (severity >= 60) alertSeverity = AlertSeverity.HIGH;
+        else if (severity >= 40) alertSeverity = AlertSeverity.MEDIUM;
+        
+        _createRiskAlert(asset, alertType, alertSeverity);
+    }
+    
+    function updateCorrelationMatrix(address[] calldata assets, uint256[][] calldata correlations) external override onlyRole(RISK_MANAGER_ROLE) {
+        require(assets.length == correlations.length, "Arrays length mismatch");
+        
+        for (uint256 i = 0; i < assets.length; i++) {
+            require(correlations[i].length == assets.length, "Correlation matrix dimension mismatch");
+            for (uint256 j = 0; j < assets.length; j++) {
+                correlationMatrix[assets[i]][assets[j]] = correlations[i][j];
+            }
+        }
+        
+        emit RiskParametersUpdated(address(0), block.timestamp, block.timestamp);
+    }
+    
+    function stressTest(address asset, uint256 shockSize) external view override returns (uint256 impact) {
+        CollateralData memory data = collateralData[asset];
+        uint256 currentValue = data.totalCollateral;
+        impact = (currentValue * shockSize * data.volatility) / (BASIS_POINTS * BASIS_POINTS);
+    }
+    
+    // Additional missing interface implementations
+    function checkRiskLimits(address asset, uint256 amount) external view override returns (bool allowed, string memory reason) {
+        CollateralData memory data = collateralData[asset];
+        
+        if (emergencyMode) {
+            return (false, "Emergency mode active");
+        }
+        
+        if (data.totalCollateral + amount > data.maxCollateral) {
+            return (false, "Exceeds maximum collateral limit");
+        }
+        
+        return (true, "");
+    }
+    
+    function isHighRiskAsset(address asset) external view override returns (bool) {
+        return collateralData[asset].volatility > 5000; // 50% volatility threshold
+    }
+    
+    function getUtilizationRatio(address asset) external view override returns (uint256 ratio) {
+        CollateralData memory data = collateralData[asset];
+        return data.maxCollateral > 0 ? (data.totalCollateral * BASIS_POINTS) / data.maxCollateral : 0;
+    }
+    
+    function getLiquidityScore(address asset) external view override returns (uint256 score) {
+        // Simple liquidity score based on collateral ratio
+        uint256 utilization = this.getUtilizationRatio(asset);
+        return utilization > 0 ? BASIS_POINTS - utilization : BASIS_POINTS;
+    }
+    
+    function getVolatilityScore(address asset) external view override returns (uint256 score) {
+        return collateralData[asset].volatility;
+    }
+    
+    function getPortfolioRisk() external view override returns (uint256 totalRisk) {
+        return _calculateSystemHealthFactor();
+    }
+    
+    function calculatePortfolioRisk(address user, address[] memory assets, uint256[] memory amounts) external view override returns (uint256 portfolioRisk) {
+        require(assets.length == amounts.length, "Arrays length mismatch");
+        
+        uint256 totalRisk = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            uint256 assetRisk = collateralData[assets[i]].volatility;
+            uint256 weightedRisk = (assetRisk * amounts[i]) / PRECISION;
+            totalRisk += weightedRisk;
+        }
+        
+        return assets.length > 0 ? totalRisk / assets.length : 0;
+    }
+    
+    function getPortfolioVaR(address user, address[] memory assets, uint256[] memory amounts, uint256 confidenceLevel) external view override returns (uint256 portfolioVaR) {
+        uint256 portfolioRisk = this.calculatePortfolioRisk(user, assets, amounts);
+        // Simplified VaR calculation
+        portfolioVaR = (portfolioRisk * (100 - confidenceLevel)) / 100;
+    }
+    
+    function getConcentrationRisk() external view override returns (uint256 concentration) {
+        return config.maxConcentration;
+    }
+    
+    function getDiversificationScore() external view override returns (uint256 score) {
+        return BASIS_POINTS - config.maxConcentration;
+    }
+    
+    function monitorRisk(address user, address[] memory assets, uint256[] memory amounts) external override onlyRole(MONITOR_ROLE) {
+        uint256 portfolioRisk = this.calculatePortfolioRisk(user, assets, amounts);
+        
+        if (portfolioRisk > 8000) { // 80% risk threshold
+            _createRiskAlert(user, "High portfolio risk detected", AlertSeverity.HIGH);
+        }
+    }
+    
+    function emergencyStop(address asset, string calldata reason) external override onlyRole(EMERGENCY_ROLE) {
+        emergencyStoppedAssets[asset] = true;
+        emit EmergencyStop(asset, reason, block.timestamp);
+    }
+    
+    function isEmergencyStopped(address asset) external view override returns (bool) {
+        return emergencyStoppedAssets[asset];
+    }
+    
+    function calculateExpectedShortfall(address asset, uint256 confidence) external view override returns (uint256 es) {
+        uint256 volatility = collateralData[asset].volatility;
+        uint256 exposure = collateralData[asset].totalCollateral;
+        es = (exposure * volatility * (100 - confidence)) / (BASIS_POINTS * 100);
+    }
+    
+    function getCorrelation(address asset1, address asset2) external view override returns (uint256 correlation) {
+        return correlationMatrix[asset1][asset2];
+    }
+    
+    function performStressTest(uint256 scenario, address[] memory assets, uint256[] memory amounts) external view override returns (StressTestResult memory stressTestResult) {
+        require(assets.length == amounts.length, "Arrays length mismatch");
+        
+        uint256 totalLoss = 0;
+        uint256 maxAssetLoss = 0;
+        
+        for (uint256 i = 0; i < assets.length; i++) {
+            uint256 assetLoss = this.stressTest(assets[i], scenario);
+            totalLoss += assetLoss;
+            if (assetLoss > maxAssetLoss) {
+                maxAssetLoss = assetLoss;
+            }
+        }
+        
+        stressTestResult = StressTestResult({
+            scenario: scenario,
+            totalLoss: totalLoss,
+            maxAssetLoss: maxAssetLoss,
+            liquidationRisk: totalLoss > config.liquidationThreshold,
+            recoveryTime: totalLoss > 0 ? (totalLoss * 30) / BASIS_POINTS : 0
+        });
+    }
+    
+    function scenarioAnalysis(address asset, uint256[] calldata scenarios) external view override returns (uint256[] memory impacts) {
+        impacts = new uint256[](scenarios.length);
+        
+        for (uint256 i = 0; i < scenarios.length; i++) {
+            impacts[i] = this.stressTest(asset, scenarios[i]);
+        }
+    }
+    
+    function backtestRiskModel(address asset, uint256[] calldata historicalPrices) external view override returns (uint256 accuracy) {
+        require(historicalPrices.length > 10, "Need more historical data");
+        
+        uint256 correctPredictions = 0;
+        uint256 volatility = collateralData[asset].volatility;
+        
+        for (uint256 i = 1; i < historicalPrices.length; i++) {
+            bool priceIncreased = historicalPrices[i] > historicalPrices[i-1];
+            bool lowVolatilityPrediction = volatility < 5000; // 50%
+            
+            if ((priceIncreased && lowVolatilityPrediction) || (!priceIncreased && !lowVolatilityPrediction)) {
+                correctPredictions++;
+            }
+        }
+        
+        accuracy = (correctPredictions * 100) / (historicalPrices.length - 1);
+    }
+    
+    function getCurrentExposure(address asset) external view override returns (uint256 exposure) {
+        return collateralData[asset].totalCollateral;
+    }
+    
+    // Storage for new interface requirements
+    mapping(string => uint256) private riskParameters;
+    mapping(address => mapping(address => uint256)) private correlationMatrix;
+    mapping(address => bool) private emergencyStoppedAssets;
+    
     // Abstract functions that must be implemented by derived contracts
-    function assessRisk(address subject, RiskType riskType) external virtual returns (RiskAssessment memory assessment);
-    function updateRiskProfile(address user, RiskProfile calldata profile) external virtual;
-    function performStressTest(bytes32 testId, address portfolio) external virtual returns (StressTestResults memory results);
-    function calculateVaR(address portfolio, uint256 confidence, uint256 timeHorizon) external virtual returns (uint256 valueAtRisk);
+
+    
+    /**
+     * @dev Update risk profile for an asset
+     * @param asset Asset address
+     * @param profile New risk profile
+     */
+    function updateRiskProfile(address asset, RiskProfile calldata profile) external override onlyRole(RISK_MANAGER_ROLE) {
+        require(asset != address(0), "Invalid asset");
+        require(profile.riskScore <= 100, "Risk score too high");
+        
+        riskProfiles[asset] = profile;
+        
+        emit RiskParametersUpdated(asset, profile.riskScore, block.timestamp);
+    }
+
+    function setRiskProfile(address user, RiskProfile memory profile) external override onlyRole(RISK_MANAGER_ROLE) {
+        require(user != address(0), "Invalid user");
+        riskProfiles[user] = profile;
+        emit RiskProfileUpdated(user, profile.riskScore, profile.maxExposure, profile.currentExposure);
+    }
+
+    function setRiskLimits(address user, RiskLimits memory limits) external override onlyRole(RISK_MANAGER_ROLE) {
+        require(user != address(0), "Invalid user");
+        userRiskLimits[user] = limits;
+    }
+
+    function getRiskScore(address asset) external view override returns (uint256 score) {
+        return riskProfiles[asset].riskScore;
+    }
+
+    function getTotalPortfolioValue() external view override returns (uint256 totalValue) {
+        return globalMetrics.totalValue;
+    }
+
+    function getWeeklyRiskTrend() external view override returns (uint256[] memory riskScores) {
+        uint256[] memory trend = new uint256[](7);
+        for (uint256 i = 0; i < 7; i++) {
+            trend[i] = globalMetrics.averageRiskScore;
+        }
+        return trend;
+    }
+
+    function getRiskLimits() external view override returns (RiskLimits memory limits) {
+        return riskLimits[msg.sender];
+    }
+
+    function getRiskMetrics() external view override returns (RiskMetrics memory metrics) {
+        return riskMetrics[msg.sender];
+    }
+
+    function getMaxAllowedExposure(address asset) external view override returns (uint256 maxExposure) {
+        return riskProfiles[asset].maxExposure;
+    }
+
+    function getDailyRiskMetrics() external view override returns (
+        uint256 dailyVar,
+        uint256 dailyVolatility,
+        uint256 sharpeRatio,
+        uint256 maxDrawdown
+    ) {
+        RiskMetrics memory metrics = riskMetrics[msg.sender];
+        return (metrics.valueAtRisk, 0, metrics.sharpeRatio, metrics.maxDrawdown);
+    }
+
+    function getMonthlyRiskSummary() external view override returns (
+        uint256 avgRisk,
+        uint256 maxRisk,
+        uint256 minRisk,
+        uint256 riskVolatility
+    ) {
+        return (globalMetrics.averageRiskScore, 100, 0, 10);
+    }
+
+    function calculateVaR(int256[] memory returnValues, uint256 confidenceLevel) external pure override returns (uint256 valueAtRisk) {
+        if (returnValues.length == 0) return 0;
+        
+        // Simple VaR calculation - sort returns and take percentile
+        uint256 index = (returnValues.length * (100 - confidenceLevel)) / 100;
+        return uint256(returnValues[index < returnValues.length ? index : returnValues.length - 1]);
+    }
+
+    function getAssetWeight(address asset) external view override returns (uint256 weight) {
+        return riskProfiles[asset].weight;
+    }
+
+    function getAssetAllocation() external view override returns (address[] memory assets, uint256[] memory allocations) {
+        // Return empty arrays for now
+        assets = new address[](0);
+        allocations = new uint256[](0);
+    }
+
+    function generateRiskReport() external view override returns (
+        uint256 totalRisk,
+        uint256 portfolioVar,
+        uint256 concentration,
+        uint256 diversification,
+        address[] memory highRiskAssets
+    ) {
+        return (globalMetrics.averageRiskScore, 0, 0, 80, new address[](0));
+    }
+
+    function assessRisk(address asset, uint256 amount) external view override returns (uint256 riskScore) {
+        RiskProfile memory profile = riskProfiles[asset];
+        return (amount * profile.riskScore) / 100;
+    }
+
+    function calculateVaR(address portfolio, uint256 confidence, uint256 timeHorizon) external virtual returns (uint256 valueAtRisk) {
+        RiskMetrics memory metrics = riskMetrics[portfolio];
+        return (metrics.valueAtRisk * timeHorizon * confidence) / 10000;
+    }
+
+    function assessRisk(address subject, RiskType riskType) external virtual returns (RiskAssessment memory assessment) {
+        assessment.subject = subject;
+        assessment.riskType = riskType;
+        assessment.score = riskProfiles[subject].riskScore;
+        assessment.timestamp = block.timestamp;
+        assessment.assessor = msg.sender;
+    }
 
     // Internal functions
     function _calculateBaseRiskScore(
@@ -708,7 +1188,7 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
     }
 
     function _createRiskAlert(address user, string memory message, AlertSeverity severity) internal {
-        RiskAlert storage alert = riskAlerts[user];
+        RiskAlertData storage alert = riskAlerts[user];
         alert.user = user;
         alert.message = message;
         alert.severity = severity;
@@ -987,6 +1467,66 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
         return validUsers > 0 ? totalHealthFactor / validUsers : type(uint256).max;
     }
 
+
+    
+    /**
+     * @dev Calculate volatility from price array
+     * @param prices Array of prices
+     * @return volatility Calculated volatility in basis points
+     */
+    function _calculateVolatility(uint256[] calldata prices) internal pure returns (uint256) {
+        if (prices.length < 2) return 0;
+        
+        uint256 sum = 0;
+        uint256 sumSquared = 0;
+        uint256 n = prices.length - 1;
+        
+        // Calculate returns
+        for (uint256 i = 1; i < prices.length; i++) {
+            if (prices[i-1] > 0) {
+                uint256 returnValue = (prices[i] * BASIS_POINTS) / prices[i-1];
+                sum += returnValue;
+                sumSquared += (returnValue * returnValue) / BASIS_POINTS;
+            }
+        }
+        
+        if (n == 0) return 0;
+        
+        uint256 mean = sum / n;
+        uint256 variance = (sumSquared / n) - (mean * mean / BASIS_POINTS);
+        
+        // Return square root approximation (simplified)
+        return _sqrt(variance);
+    }
+    
+    /**
+     * @dev Simple square root approximation
+     * @param x Input value
+     * @return Square root approximation
+     */
+    function _sqrt(uint256 x) internal pure returns (uint256) {
+        if (x == 0) return 0;
+        uint256 z = (x + 1) / 2;
+        uint256 y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+        return y;
+    }
+
+    function updateVolatilityModel(address asset, uint256[] calldata prices) external override onlyRole(RISK_MANAGER_ROLE) {
+        require(prices.length >= 2, "Insufficient price data");
+        
+        uint256 volatility = _calculateVolatility(prices);
+        
+        CollateralData storage data = collateralData[asset];
+        data.volatility = volatility;
+        data.lastUpdate = block.timestamp;
+        
+        emit RiskParametersUpdated(asset, volatility, block.timestamp);
+    }
+
     // Emergency functions
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
@@ -994,5 +1534,10 @@ abstract contract RiskManagement is IRiskManagement, AccessControl, ReentrancyGu
 
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
+    }
+
+    function calculateStressTestImpact(address asset, uint256 shockSize) external view returns (uint256 impact) {
+        RiskProfile memory profile = riskProfiles[asset];
+        return (profile.riskScore * shockSize) / 100;
     }
 }

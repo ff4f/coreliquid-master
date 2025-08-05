@@ -152,53 +152,51 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
     }
     
     function executeLiquidation(
-        uint256 positionId
+        address borrower,
+        address borrowToken,
+        address collateralToken
     ) external onlyRole(LIQUIDATOR_ROLE) nonReentrant whenNotPaused returns (uint256 liquidationId) {
-        require(positionId > 0, "Invalid position ID");
-        require(positionToLiquidation[positionId] == 0, "Position already being liquidated");
+        require(borrower != address(0), "Invalid borrower");
+        require(borrowToken != address(0), "Invalid borrow token");
+        require(collateralToken != address(0), "Invalid collateral token");
         
         // Get position data from BorrowEngine
-        (uint256 currentLTV, uint256 liquidationThreshold, uint256 healthFactor, bool isLiquidatable) = 
-            borrowEngine.getPositionHealth(positionId);
+        uint256 healthFactor = borrowEngine.getPositionHealth(borrower);
+        bool isLiquidatable = borrowEngine.isLiquidatable(borrower);
         
         require(isLiquidatable, "Position not liquidatable");
         
-        // Get position details
-        (uint256 posId, address borrower, address borrowToken, address collateralToken, uint256 borrowAmount, uint256 collateralAmount, uint256 borrowTimestamp, uint256 lastInterestUpdate, uint256 accruedInterest, uint256 positionLiquidationThreshold, uint256 ltv, bool isActive, bool isLiquidated) = borrowEngine.borrowPositions(positionId);
+        // Get position details from BorrowEngine
+        (uint256 positionBorrowAmount, uint256 positionCollateralAmount, uint256 positionBorrowIndex, uint256 positionLastUpdateTime, address positionCollateralToken, address positionBorrowToken, bool positionIsActive, uint256 positionLiquidationThreshold, uint256 positionHealthFactor) = borrowEngine.borrowPositions(borrower, borrowToken);
+        require(positionIsActive, "Position not active");
         
-        // Create a temporary struct for easier access
+        // Create position struct for easier access
         BorrowEngine.BorrowPosition memory position = BorrowEngine.BorrowPosition({
-            positionId: posId,
-            borrower: borrower,
-            borrowToken: borrowToken,
-            collateralToken: collateralToken,
-            borrowAmount: borrowAmount,
-            collateralAmount: collateralAmount,
-            borrowTimestamp: borrowTimestamp,
-            lastInterestUpdate: lastInterestUpdate,
-            accruedInterest: accruedInterest,
-            liquidationThreshold: liquidationThreshold,
-            ltv: ltv,
-            isActive: isActive,
-            isLiquidated: isLiquidated
+            borrowAmount: positionBorrowAmount,
+            collateralAmount: positionCollateralAmount,
+            borrowIndex: positionBorrowIndex,
+            lastUpdateTime: positionLastUpdateTime,
+            collateralToken: positionCollateralToken,
+            borrowToken: positionBorrowToken,
+            isActive: positionIsActive,
+            liquidationThreshold: positionLiquidationThreshold,
+            healthFactor: positionHealthFactor
         });
-        require(position.isActive, "Position not active");
         
-        LiquidationConfig memory config = liquidationConfigs[position.borrowToken];
+        LiquidationConfig memory config = liquidationConfigs[borrowToken];
         require(config.isEnabled, "Liquidation not enabled");
         
         liquidationId = nextLiquidationId++;
         
         if (config.requiresAuction) {
             // Start auction process
-            _startAuction(liquidationId, positionId, position);
+            _startAuction(liquidationId, liquidationId, borrower, position);
         } else {
             // Direct liquidation
-            _executeDirectLiquidation(liquidationId, positionId, position, config);
+            _executeDirectLiquidation(liquidationId, borrower, borrowToken, collateralToken, position, config);
         }
         
-        positionToLiquidation[positionId] = liquidationId;
-        userLiquidations[position.borrower].push(liquidationId);
+        userLiquidations[borrower].push(liquidationId);
         liquidatorHistory[msg.sender].push(liquidationId);
         
         totalLiquidations++;
@@ -206,12 +204,14 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
     
     function _executeDirectLiquidation(
         uint256 liquidationId,
-        uint256 positionId,
+        address borrower,
+        address borrowToken,
+        address collateralToken,
         BorrowEngine.BorrowPosition memory position,
         LiquidationConfig memory config
     ) internal {
         // Calculate liquidation amounts
-        uint256 totalDebt = position.borrowAmount + position.accruedInterest;
+        uint256 totalDebt = position.borrowAmount;
         uint256 maxLiquidationAmount = Math.min(totalDebt, config.maxLiquidationAmount);
         
         // Calculate collateral to seize
@@ -242,7 +242,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         
         // Seize collateral
         uint256 actualSeized = collateralManager.seizeCollateral(
-            position.borrower,
+            borrower,
             position.collateralToken,
             collateralToSeize,
             address(this)
@@ -265,11 +265,11 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         // Store liquidation data
         liquidations[liquidationId] = LiquidationData({
             liquidationId: liquidationId,
-            positionId: positionId,
-            borrower: position.borrower,
+            positionId: liquidationId, // Use liquidationId as positionId for now
+            borrower: borrower,
             liquidator: msg.sender,
-            borrowToken: position.borrowToken,
-            collateralToken: position.collateralToken,
+            borrowToken: borrowToken,
+            collateralToken: collateralToken,
             liquidatedAmount: maxLiquidationAmount,
             collateralSeized: actualSeized,
             liquidatorReward: liquidatorReward,
@@ -283,9 +283,9 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         
         emit LiquidationExecuted(
             liquidationId,
-            positionId,
+            liquidationId, // Use liquidationId as positionId for now
             msg.sender,
-            position.borrower,
+            borrower,
             maxLiquidationAmount,
             actualSeized
         );
@@ -294,11 +294,12 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
     function _startAuction(
         uint256 liquidationId,
         uint256 positionId,
+        address borrower,
         BorrowEngine.BorrowPosition memory position
     ) internal {
         uint256 auctionId = nextAuctionId++;
         
-        uint256 totalDebt = position.borrowAmount + position.accruedInterest;
+        uint256 totalDebt = position.borrowAmount;
         uint256 collateralValue = collateralManager.getCollateralValue(
             position.collateralToken,
             position.collateralAmount
@@ -327,8 +328,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         // Store liquidation data
         liquidations[liquidationId] = LiquidationData({
             liquidationId: liquidationId,
-            positionId: positionId,
-            borrower: position.borrower,
+            positionId: liquidationId,
+            borrower: borrower,
             liquidator: address(0), // Will be set when auction completes
             borrowToken: position.borrowToken,
             collateralToken: position.collateralToken,
@@ -390,7 +391,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
             _completeAuctionLiquidation(auctionId);
         } else {
             // No bids - execute emergency liquidation
-            _executeEmergencyLiquidation(auction.positionId);
+            _executeEmergencyLiquidation(liquidations[auction.auctionId].borrower, liquidations[auction.auctionId].borrowToken);
         }
     }
     
@@ -442,38 +443,36 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         );
     }
     
-    function _executeEmergencyLiquidation(uint256 positionId) internal {
+    function _executeEmergencyLiquidation(address borrower, address borrowToken) internal {
         // Emergency liquidation at current market price
-        (uint256 posId, address borrower, address borrowToken, address collateralToken, uint256 borrowAmount, uint256 collateralAmount, uint256 borrowTimestamp, uint256 lastInterestUpdate, uint256 accruedInterest, uint256 liquidationThreshold, uint256 ltv, bool isActive, bool isLiquidated) = borrowEngine.borrowPositions(positionId);
+        // Get position details from BorrowEngine
+        (uint256 positionBorrowAmount, uint256 positionCollateralAmount, uint256 positionBorrowIndex, uint256 positionLastUpdateTime, address positionCollateralToken, address positionBorrowToken, bool positionIsActive, uint256 positionLiquidationThreshold, uint256 positionHealthFactor) = borrowEngine.borrowPositions(borrower, borrowToken);
         
-        // Create a temporary struct for easier access
+        // Create position struct for easier access
         BorrowEngine.BorrowPosition memory position = BorrowEngine.BorrowPosition({
-            positionId: posId,
-            borrower: borrower,
-            borrowToken: borrowToken,
-            collateralToken: collateralToken,
-            borrowAmount: borrowAmount,
-            collateralAmount: collateralAmount,
-            borrowTimestamp: borrowTimestamp,
-            lastInterestUpdate: lastInterestUpdate,
-            accruedInterest: accruedInterest,
-            liquidationThreshold: liquidationThreshold,
-            ltv: ltv,
-            isActive: isActive,
-            isLiquidated: isLiquidated
+            borrowAmount: positionBorrowAmount,
+            collateralAmount: positionCollateralAmount,
+            borrowIndex: positionBorrowIndex,
+            lastUpdateTime: positionLastUpdateTime,
+            collateralToken: positionCollateralToken,
+            borrowToken: positionBorrowToken,
+            isActive: positionIsActive,
+            liquidationThreshold: positionLiquidationThreshold,
+            healthFactor: positionHealthFactor
         });
+        require(position.isActive, "Position not active");
         
-        uint256 totalDebt = position.borrowAmount + position.accruedInterest;
+        uint256 totalDebt = position.borrowAmount;
         
         // Seize all collateral
         uint256 seizedCollateral = collateralManager.seizeCollateral(
-            position.borrower,
+            borrower,
             position.collateralToken,
             position.collateralAmount,
             treasury // Send to treasury for emergency liquidation
         );
         
-        emit EmergencyLiquidation(positionId, position.borrower, totalDebt);
+        emit EmergencyLiquidation(0, borrower, totalDebt); // positionId not available in this context
     }
     
     function getCurrentAuctionPrice(uint256 auctionId) external view returns (uint256 currentPrice) {
@@ -492,9 +491,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, Pausable {
         currentPrice = auction.startPrice > priceDecay ? auction.startPrice - priceDecay : 0;
     }
     
-    function isPositionLiquidatable(uint256 positionId) external view returns (bool) {
-        (, , , bool isLiquidatable) = borrowEngine.getPositionHealth(positionId);
-        return isLiquidatable;
+    function isPositionLiquidatable(address borrower) external view returns (bool) {
+        return borrowEngine.isLiquidatable(borrower);
     }
     
     function getLiquidationData(uint256 liquidationId) external view returns (LiquidationData memory) {

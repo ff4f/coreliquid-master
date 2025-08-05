@@ -403,20 +403,21 @@ contract DEXAggregatorRouter is AccessControl, ReentrancyGuard {
         uint256 amountIn,
         TradeRoute memory route
     ) internal returns (uint256) {
-        require(route.poolIds.length > 0, "Invalid route");
+        require(route.pools.length > 0, "Invalid route");
         
         uint256 currentAmount = amountIn;
         address currentTokenIn = tokenIn;
         address currentTokenOut;
         
         // Execute trades through each pool in the route
-        for (uint256 i = 0; i < route.poolIds.length; i++) {
-            bytes32 poolId = route.poolIds[i];
+        for (uint256 i = 0; i < route.pools.length; i++) {
+            address poolAddress = route.pools[i];
+            bytes32 poolId = keccak256(abi.encodePacked(poolAddress, route.dexTypes[i]));
             LiquidityPool storage pool = liquidityPools[poolId];
             require(pool.isActive, "Pool not active");
             
             // Determine output token for this hop
-            if (i == route.poolIds.length - 1) {
+            if (i == route.pools.length - 1) {
                 currentTokenOut = tokenOut;
             } else {
                 // For multi-hop, determine intermediate token

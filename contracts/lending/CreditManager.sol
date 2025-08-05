@@ -138,7 +138,7 @@ contract CreditManager is AccessControl, ReentrancyGuard, Pausable {
         require(m.isActive && m.canBorrow, "borrow disabled");
 
         // Calculate markup via DynamicFeeModel
-        uint256 feeBps = feeModel.getMarkupBps(asset, m.utilisationRate);
+        uint256 feeBps = feeModel.getMarkupBps(asset, m.totalSupply, m.totalBorrowPrincipal, 0);
         uint256 markup = (principal * feeBps) / BASIS_POINTS;
 
         // Accounting updates

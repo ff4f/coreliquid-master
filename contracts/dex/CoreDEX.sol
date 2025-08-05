@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "../tokens/UnifiedLPToken.sol";
@@ -215,7 +216,7 @@ contract CoreDEX is AccessControl, ReentrancyGuard, Pausable {
         // Create LP token for this pair
         string memory name = string(abi.encodePacked("CoreDEX LP ", _getTokenSymbol(token0), "-", _getTokenSymbol(token1)));
         string memory symbol = string(abi.encodePacked("CLP-", _getTokenSymbol(token0), "-", _getTokenSymbol(token1)));
-        pairTokens[pairId] = new UnifiedLPToken(name, symbol);
+        pairTokens[pairId] = new UnifiedLPToken(name, symbol, address(this), feeRecipient);
         
         // Update mappings
         getPair[token0][token1] = pairId;
@@ -350,12 +351,12 @@ contract CoreDEX is AccessControl, ReentrancyGuard, Pausable {
         
         // Try zero-slippage trade first if requested
         if (params.useZeroSlippage) {
-            try zeroSlippageEngine.executeZeroSlippageTrade(
+            try zeroSlippageEngine.executeTradeWithProtection(
                 params.tokenIn,
                 params.tokenOut,
                 params.amountIn,
                 params.amountOutMin,
-                params.to
+                block.timestamp + 300
             ) returns (uint256 zeroSlippageAmount) {
                 amountOut = zeroSlippageAmount;
                 
@@ -446,12 +447,12 @@ contract CoreDEX is AccessControl, ReentrancyGuard, Pausable {
         priceImpact = _calculatePriceImpact(pair, tokenIn, amountIn, amountOut);
         
         // Check zero slippage availability
-        (uint256 zeroSlippageAmount, bool isEligible) = zeroSlippageEngine.getZeroSlippageQuote(
+        (uint256 zeroSlippageAmount, uint256 maxSlippage) = zeroSlippageEngine.getProtectedQuote(
             tokenIn,
             tokenOut,
             amountIn
         );
-        zeroSlippageAvailable = isEligible && zeroSlippageAmount >= amountOut;
+        zeroSlippageAvailable = zeroSlippageAmount >= amountOut;
     }
     
     /**
@@ -557,7 +558,7 @@ contract CoreDEX is AccessControl, ReentrancyGuard, Pausable {
      * @dev Get token symbol (simplified)
      */
     function _getTokenSymbol(address token) internal view returns (string memory) {
-        try IERC20(token).symbol() returns (string memory symbol) {
+        try IERC20Metadata(token).symbol() returns (string memory symbol) {
             return symbol;
         } catch {
             return "TOKEN";

@@ -10,11 +10,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowUpRight, Shield, TrendingUp, Zap, Info, CheckCircle, Wallet } from "lucide-react"
 import { usePortfolio } from "@/contexts/portfolio-context"
 import { useToast } from "@/hooks/use-toast"
+import { useCoreFluidX } from "@/hooks/use-corefluidx"
+import { useAccount, useBalance } from "wagmi"
+import { CONTRACT_ADDRESSES } from "@/lib/wagmi"
 import { tokens, getTokenData, formatCurrency } from "@/lib/token-data"
 
 export default function VaultPage() {
   const { state, dispatch } = usePortfolio()
   const { toast } = useToast()
+  const { address, isConnected } = useAccount()
+  const { data: balance } = useBalance({ address })
+  const {
+    contracts,
+    isLoading: contractsLoading,
+    depositToULP,
+    isTransactionPending
+  } = useCoreFluidX()
 
   const vaultStrategies = [
     {
@@ -53,6 +64,7 @@ export default function VaultPage() {
   const [investAmount, setInvestAmount] = useState("")
   const [selectedToken, setSelectedToken] = useState("USDT")
   const [isProcessing, setIsProcessing] = useState(false)
+  const [txHash, setTxHash] = useState<string | null>(null)
 
   const tokenList = Object.entries(tokens).map(([symbol, data]) => {
     const userBalance = state.positions
@@ -68,10 +80,19 @@ export default function VaultPage() {
   })
 
   const handleInvest = async () => {
-    if (!state.isWalletConnected) {
+    if (!isConnected || !address) {
       toast({
         title: "Wallet Not Connected",
         description: "Please connect your wallet to invest.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!contracts) {
+      toast({
+        title: "Contracts Not Loaded",
+        description: "Smart contracts are still loading. Please wait.",
         variant: "destructive",
       })
       return
@@ -98,12 +119,56 @@ export default function VaultPage() {
     }
 
     setIsProcessing(true)
-    console.log(`Investing ${amount} ${selectedToken} into ${selectedVault.name}`)
+    setTxHash(null)
 
     try {
-      // Simulate investment process
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      let transactionHash: string
+      
+      if (selectedToken === "CORE") {
+        // For native CORE, stake to get stCORE first
+        const tx = await contracts.stakeCore(investAmount)
+        await tx.wait()
+        transactionHash = tx.hash
+        
+        toast({
+          title: "Staking Successful",
+          description: `Successfully staked ${investAmount} CORE for stCORE in ${selectedVault.name}`,
+        })
+      } else {
+        // For other tokens, deposit to vault strategy
+        const selectedTokenData = getTokenData(selectedToken)
+        const tokenAddress = selectedTokenData.address || CONTRACT_ADDRESSES.CORE_LIQUID_TOKEN
+        
+        // Map vault strategy to appropriate contract function
+        let tx
+        switch (selectedVault.id) {
+          case "low":
+            // Stable yield - deposit to ULP
+            tx = await contracts.depositToULP(tokenAddress, investAmount)
+            break
+          case "balanced":
+            // Balanced growth - deposit to optimized TULL
+            tx = await contracts.depositToOptimizedTULL(tokenAddress, investAmount, address)
+            break
+          case "high":
+            // High yield - deposit to simple TULL
+            tx = await contracts.depositToSimpleTULL(tokenAddress, investAmount, address)
+            break
+          default:
+            tx = await contracts.depositToULP(tokenAddress, investAmount)
+        }
+        
+        await tx.wait()
+        transactionHash = tx.hash
+        
+        toast({
+          title: "Investment Successful!",
+          description: `Successfully invested ${investAmount} ${selectedToken} into ${selectedVault.name}`,
+        })
+      }
 
+      setTxHash(transactionHash)
+      
       const tokenData = getTokenData(selectedToken)
       const valueUSD = amount * tokenData.price
 
@@ -117,20 +182,16 @@ export default function VaultPage() {
           valueUSD: valueUSD,
           apy: Number.parseFloat(selectedVault.apy),
           timestamp: Date.now(),
+          txHash: transactionHash,
         },
       })
 
-      toast({
-        title: "Investment Successful!",
-        description: `You have successfully invested ${amount} ${selectedToken} into the ${selectedVault.name}.`,
-        variant: "default",
-      })
-
       setInvestAmount("")
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Investment failed:', error)
       toast({
         title: "Investment Failed",
-        description: "Failed to process investment. Please try again.",
+        description: error.message || "Failed to process investment. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -282,6 +343,29 @@ export default function VaultPage() {
             >
               {isProcessing ? "PROCESSING_INVESTMENT..." : "EXECUTE_INVESTMENT"}
             </Button>
+            
+            {/* Transaction Hash Display */}
+            {txHash && (
+              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                <div className="flex items-start space-x-2">
+                  <CheckCircle className="w-4 h-4 text-green-500 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-green-400 font-medium font-mono text-sm">Transaction Successful!</p>
+                    <p className="text-gray-400 text-xs font-mono mt-1">TX Hash:</p>
+                    <p className="text-green-300 text-xs font-mono break-all">{txHash}</p>
+                    <a
+                      href={`https://scan.test2.btcs.network/tx/${txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-400 hover:text-cyan-300 text-xs font-mono underline mt-1 inline-block"
+                    >
+                      View on Core Testnet Explorer →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {!state.isWalletConnected && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-center space-x-2">
                 <Wallet className="w-4 h-4 text-red-500" />

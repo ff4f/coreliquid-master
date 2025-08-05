@@ -41,6 +41,14 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         CANCELLED
     }
     
+    enum OperationStatus {
+        PENDING,
+        EXECUTING,
+        EXECUTED,
+        FAILED,
+        CANCELLED
+    }
+    
     struct BatchOperation {
         uint256 operationId;
         address user;
@@ -52,6 +60,8 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         uint256 gasPrice;
         uint256 deadline;
         uint256 nonce;
+        uint256 earliestExecution;
+        OperationStatus status;
         bytes signature;
         bool isExecuted;
     }
@@ -101,8 +111,8 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
     uint256 public totalGasSaved;
     
     // Pending operations queue
-    uint256[] public pendingOperations;
     mapping(OperationType => uint256[]) public operationsByType;
+    uint256[] public pendingOperations;
     
     event OperationQueued(
         uint256 indexed operationId,
@@ -176,6 +186,8 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
             gasPrice: tx.gasprice,
             deadline: deadline,
             nonce: nonce,
+            earliestExecution: block.timestamp,
+            status: OperationStatus.PENDING,
             signature: signature,
             isExecuted: false
         });
@@ -195,7 +207,7 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
     /**
      * @dev Execute a batch of operations
      */
-    function executeBatch(uint256[] calldata operationIds) external onlyRole(EXECUTOR_ROLE) nonReentrant {
+    function executeBatch(uint256[] calldata operationIds) public onlyRole(EXECUTOR_ROLE) nonReentrant {
         require(operationIds.length >= minBatchSize, "Batch too small");
         require(operationIds.length <= maxBatchSize, "Batch too large");
         
@@ -367,7 +379,7 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         
         if (validOps >= minBatchSize) {
             // Trigger auto-execution
-            _executeAutoBatch()
+            _executeAutoBatch();
         }
     }
     
@@ -454,7 +466,7 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
         // Filter valid operations
         for (uint256 i = 0; i < pendingOperations.length; i++) {
             uint256 opId = pendingOperations[i];
-            BatchOperation storage op = batchOperations[opId];
+            BatchOperation storage op = operations[opId];
             
             if (op.status == OperationStatus.PENDING && 
                 block.timestamp >= op.earliestExecution &&
@@ -477,7 +489,7 @@ contract TransactionBatchingEngine is AccessControl, ReentrancyGuard, EIP712 {
             }
             
             // Execute the batch
-            executeBatch(finalOperations);
+            this.executeBatch(finalOperations);
         }
     }
 }

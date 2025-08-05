@@ -114,11 +114,16 @@ export default function DepositPage() {
       } else if (selectedToken === "CLT") {
         // For CLT token, add to liquidity pool
         // First approve if needed
-        const allowance = await contracts.getContract('coreLiquidToken')?.allowance(address, CONTRACT_ADDRESSES.CORE_LIQUID_POOL)
+        const cltContract = contracts.getContract('coreLiquidToken')
+        if (!cltContract) {
+          throw new Error('CLT contract not available')
+        }
+        
+        const allowance = await cltContract.allowance(address, CONTRACT_ADDRESSES.CORE_LIQUID_PROTOCOL)
         const amountWei = BigInt(Math.floor(amount * 1e18))
         
         if (allowance < amountWei) {
-          const approveTx = await contracts.approveToken(CONTRACT_ADDRESSES.CORE_LIQUID_POOL, depositAmount)
+          const approveTx = await contracts.approveToken(CONTRACT_ADDRESSES.CORE_LIQUID_PROTOCOL, depositAmount)
           await approveTx.wait()
           
           toast({

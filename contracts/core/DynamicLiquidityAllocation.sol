@@ -854,7 +854,7 @@ contract DynamicLiquidityAllocation is AccessControl, ReentrancyGuard {
             uint256 availableLiquidity,
             uint256 allocatedLiquidity,
             uint256 currentUtilization,
-            uint256[] memory activeProtocols
+            uint256[] memory _activeProtocols
         ) 
     {
         Asset storage assetData = assets[asset];

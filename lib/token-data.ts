@@ -41,6 +41,7 @@ export const tokens: Record<string, TokenData> = {
     icon: '⟠',
     price: 2450.00,
     decimals: 18,
+    address: '0x40375C92d9FAf44d2f9db9Bd9ba41a3317a2404f',
   },
   WBTC: {
     symbol: 'WBTC',
@@ -48,6 +49,7 @@ export const tokens: Record<string, TokenData> = {
     icon: '₿',
     price: 43250.00,
     decimals: 8,
+    address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
   },
   USDC: {
     symbol: 'USDC',
@@ -55,6 +57,7 @@ export const tokens: Record<string, TokenData> = {
     icon: '💵',
     price: 1.00,
     decimals: 6,
+    address: '0xA0b86a33E6441b8435b662303c0f479c7e1d5a3e',
   },
   USDT: {
     symbol: 'USDT',
@@ -62,6 +65,7 @@ export const tokens: Record<string, TokenData> = {
     icon: '💰',
     price: 1.00,
     decimals: 6,
+    address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
   },
   DAI: {
     symbol: 'DAI',
@@ -69,17 +73,28 @@ export const tokens: Record<string, TokenData> = {
     icon: '🏛️',
     price: 1.00,
     decimals: 18,
+    address: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
   },
 };
 
 export function getTokenData(symbol: string): TokenData {
-  return tokens[symbol] || {
-    symbol,
-    name: 'Unknown Token',
-    icon: '❓',
-    price: 0,
-    decimals: 18,
-  };
+  const token = tokens[symbol];
+  if (!token) {
+    throw new Error(`Token ${symbol} not found`);
+  }
+  return token;
+}
+
+export function getTokenAddress(symbol: string): string {
+  const token = getTokenData(symbol);
+  if (token.isNative) {
+    // For native CORE token, use zero address or specific native token address
+    return '0x0000000000000000000000000000000000000000';
+  }
+  if (!token.address) {
+    throw new Error(`Address not found for token ${symbol}`);
+  }
+  return token.address;
 }
 
 export function formatCurrency(amount: number, currency = 'USD'): string {

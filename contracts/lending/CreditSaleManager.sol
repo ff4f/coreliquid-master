@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./FeeSpreadModel.sol";
@@ -65,7 +65,7 @@ contract CreditSaleManager is Ownable, ReentrancyGuard {
     address public treasury;
     uint256 public totalFeesCollected;
     
-    constructor(address _feeSpreadModel, address _treasury) {
+    constructor(address _feeSpreadModel, address _treasury) Ownable(msg.sender) {
         require(_feeSpreadModel != address(0), "Invalid fee spread model");
         require(_treasury != address(0), "Invalid treasury address");
         

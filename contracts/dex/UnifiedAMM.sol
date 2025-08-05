@@ -476,8 +476,8 @@ contract UnifiedAMM is AccessControl, ReentrancyGuard, Pausable {
     function getPoolStats(uint256 poolId) external view returns (PoolStats memory stats) {
         Pool storage pool = pools[poolId];
         
-        uint256 priceA = priceOracle.getPrice(pool.tokenA);
-        uint256 priceB = priceOracle.getPrice(pool.tokenB);
+        (uint256 priceA,) = priceOracle.getPrice(pool.tokenA);
+        (uint256 priceB,) = priceOracle.getPrice(pool.tokenB);
         
         uint256 tvl = (pool.reserveA * priceA + pool.reserveB * priceB) / PRECISION;
         
@@ -742,8 +742,8 @@ contract UnifiedAMM is AccessControl, ReentrancyGuard, Pausable {
         uint256 yearlyFees = dailyFees * 365;
         
         // Get TVL in USD
-        uint256 priceA = priceOracle.getPrice(pool.tokenA);
-        uint256 priceB = priceOracle.getPrice(pool.tokenB);
+        (uint256 priceA,) = priceOracle.getPrice(pool.tokenA);
+        (uint256 priceB,) = priceOracle.getPrice(pool.tokenB);
         uint256 tvl = (pool.reserveA * priceA + pool.reserveB * priceB) / PRECISION;
         
         if (tvl == 0) return 0;

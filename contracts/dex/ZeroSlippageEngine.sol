@@ -603,7 +603,7 @@ contract ZeroSlippageEngine is AccessControl, ReentrancyGuard {
                 executed: false
             });
             
-            arbitrageOpportunities[token].push(opportunity);
+            arbitrageOpportunities[keccak256(abi.encodePacked(token))].push(opportunity);
         }
     }
     

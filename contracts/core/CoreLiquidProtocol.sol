@@ -40,6 +40,17 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
     // Core Chain native components
     CoreNativeStaking public coreNativeStaking;
     
+    // Additional protocol components
+    address public depositManager;
+    address public autoRebalanceManager;
+    address public rebalanceFlow;
+    address public borrowEngine;
+    address public interestRateModel;
+    address public yieldAggregator;
+    address public yieldOptimizer;
+    address public yieldStrategy;
+    address public aprOptimizer;
+    
     // Protocol state
     struct ProtocolMetrics {
         uint256 totalValueLocked;
@@ -265,19 +276,19 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         // require(_aprCalculator != address(0), "Invalid APR calculator"); // Functionality integrated
         require(_aprOptimizer != address(0), "Invalid APR optimizer");
         
-        depositManager = DepositManager(_depositManager);
-        autoRebalanceManager = AutoRebalanceManager(_autoRebalanceManager);
-        rebalanceFlow = RebalanceFlow(_rebalanceFlow);
-        borrowEngine = BorrowEngine(_borrowEngine);
+        depositManager = _depositManager;
+        autoRebalanceManager = _autoRebalanceManager;
+        rebalanceFlow = _rebalanceFlow;
+        borrowEngine = _borrowEngine;
         collateralManager = CollateralManager(_collateralManager);
-        interestRateModel = InterestRateModel(_interestRateModel);
+        interestRateModel = _interestRateModel;
         liquidationEngine = LiquidationEngine(_liquidationEngine);
         vaultManager = VaultManager(_vaultManager);
-        yieldAggregator = YieldAggregator(_yieldAggregator);
-        yieldOptimizer = YieldOptimizer(_yieldOptimizer);
-        yieldStrategy = YieldStrategy(_yieldStrategy);
+        yieldAggregator = _yieldAggregator;
+        yieldOptimizer = _yieldOptimizer;
+        yieldStrategy = _yieldStrategy;
         // aprCalculator = APRCalculator(_aprCalculator); // Functionality integrated
-        aprOptimizer = APROptimizer(_aprOptimizer);
+        aprOptimizer = _aprOptimizer;
         
         // Authorize all components
         authorizedContracts[_depositManager] = true;
@@ -318,7 +329,11 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         );
         
         // Execute deposit through DepositManager (simplified interface)
-        bytes32 depositId = depositManager.deposit(token, amount);
+        (bool success, bytes memory data) = depositManager.call(
+            abi.encodeWithSignature("deposit(address,uint256)", token, amount)
+        );
+        require(success, "Deposit failed");
+        bytes32 depositId = abi.decode(data, (bytes32));
         // Calculate LP tokens based on current pool ratio
         uint256 lpTokens = _calculateLPTokens(token, amount);
         require(lpTokens >= minLPTokens, "Insufficient LP tokens received");
@@ -382,12 +397,18 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         );
         
         // Execute borrow through BorrowEngine
-        uint256 positionId = borrowEngine.createBorrowPosition(
-            asset,
-            collateralAsset,
-            amount,
-            collateralAmount
+        (bool success, bytes memory data) = borrowEngine.call(
+            abi.encodeWithSignature(
+                "createBorrowPosition(address,address,uint256,address,uint256)",
+                msg.sender,
+                collateralAsset,
+                collateralAmount,
+                asset,
+                amount
+            )
         );
+        require(success, "Borrow position creation failed");
+        uint256 positionId = abi.decode(data, (uint256));
         
         // Update user profile
         profile.totalBorrowed += amount;
@@ -418,7 +439,10 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         UserProfile storage profile = userProfiles[msg.sender];
         
         // Execute repayment through BorrowEngine
-        borrowEngine.repayBorrow(positionId, amount);
+        (bool success,) = borrowEngine.call(
+            abi.encodeWithSignature("repayBorrow(uint256,uint256)", positionId, amount)
+        );
+        require(success, "Repay failed");
         uint256 repaidAmount = amount; // Simplified - in production get actual repaid amount
         
         // Update user profile
@@ -443,7 +467,10 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         require(positionOwner != address(0), "Position not found");
         
         // Execute liquidation through LiquidationEngine
-        borrowEngine.liquidatePosition(positionId);
+        (bool success,) = address(liquidationEngine).call(
+            abi.encodeWithSignature("liquidatePosition(uint256)", positionId)
+        );
+        require(success, "Liquidation failed");
         
         UserProfile storage profile = userProfiles[positionOwner];
         profile.lastActivity = block.timestamp;
@@ -460,7 +487,11 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         require(amount > 0, "Invalid amount");
         
         // Execute yield optimization
-        YieldOptimizer.OptimizationResult memory result = yieldOptimizer.optimizeYield(user, amount);
+        (bool success, bytes memory data) = yieldOptimizer.call(
+            abi.encodeWithSignature("optimizeYield(address,uint256)", user, amount)
+        );
+        require(success, "Yield optimization failed");
+        // Parse result from returned data as needed
         
         UserProfile storage profile = userProfiles[user];
         profile.lastActivity = block.timestamp;
@@ -474,7 +505,10 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         require(positionOwners[positionId] != address(0), "Position not found");
         
         // Execute rebalancing through RebalanceFlow
-        rebalanceFlow.initiateRebalanceFlow(positionId);
+        (bool success,) = rebalanceFlow.call(
+            abi.encodeWithSignature("initiateRebalanceFlow(uint256)", positionId)
+        );
+        require(success, "Rebalance failed");
         
         address positionOwner = positionOwners[positionId];
         UserProfile storage profile = userProfiles[positionOwner];
@@ -487,7 +521,10 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         uint256 strategyId
     ) external onlyRole(KEEPER_ROLE) nonReentrant {
         // Execute harvest through YieldStrategy
-        yieldStrategy.harvest(strategyId);
+        (bool success,) = yieldStrategy.call(
+            abi.encodeWithSignature("harvest(uint256)", strategyId)
+        );
+        require(success, "Harvest failed");
         
         _updateProtocolMetrics();
     }
@@ -614,14 +651,14 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         address oldAddress;
         
         if (keccak256(bytes(componentName)) == keccak256(bytes("depositManager"))) {
-            oldAddress = address(depositManager);
-            depositManager = DepositManager(newAddress);
+            oldAddress = depositManager;
+            depositManager = newAddress;
         } else if (keccak256(bytes(componentName)) == keccak256(bytes("borrowEngine"))) {
-            oldAddress = address(borrowEngine);
-            borrowEngine = BorrowEngine(newAddress);
+            oldAddress = borrowEngine;
+            borrowEngine = newAddress;
         } else if (keccak256(bytes(componentName)) == keccak256(bytes("yieldAggregator"))) {
-            oldAddress = address(yieldAggregator);
-            yieldAggregator = YieldAggregator(newAddress);
+            oldAddress = yieldAggregator;
+            yieldAggregator = newAddress;
         }
         // Add more components as needed
         
@@ -696,7 +733,11 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
         require(protocolConfig.emergencyMode, "Not in emergency mode");
         require(to != address(0), "Invalid recipient");
         
-        IERC20(token).transfer(to, amount);
+        // Transfer tokens using low-level call for safety
+        (bool success,) = token.call(
+            abi.encodeWithSignature("transfer(address,uint256)", to, amount)
+        );
+        require(success, "Emergency transfer failed");
     }
     
     function emergencyPause() external onlyRole(EMERGENCY_ROLE) {
@@ -759,8 +800,8 @@ contract CoreLiquidProtocol is AccessControl, ReentrancyGuard, Pausable, Initial
      */
     function _calculateLPTokens(address token, uint256 amount) internal view returns (uint256) {
         // Get current pool state from vault manager
-        uint256 totalPoolValue = vaultManager.getTotalPoolValue(token);
-        uint256 totalLPSupply = vaultManager.getTotalLPSupply(token);
+        uint256 totalPoolValue = vaultManager.getTotalAssets();
+        uint256 totalLPSupply = vaultManager.totalShares();
         
         if (totalLPSupply == 0 || totalPoolValue == 0) {
             // First deposit - 1:1 ratio

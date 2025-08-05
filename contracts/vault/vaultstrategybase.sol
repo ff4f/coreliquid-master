@@ -2,11 +2,10 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -15,7 +14,6 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
  */
 abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
-    using SafeMath for uint256;
     using Math for uint256;
 
     bytes32 public constant STRATEGY_MANAGER_ROLE = keccak256("STRATEGY_MANAGER_ROLE");
@@ -151,9 +149,9 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
         require(shares > 0, "No shares to mint");
 
         // Update state
-        strategyInfo.totalDeposits = strategyInfo.totalDeposits.add(amount);
-        strategyInfo.totalShares = strategyInfo.totalShares.add(shares);
-        userShares[msg.sender] = userShares[msg.sender].add(shares);
+        strategyInfo.totalDeposits = strategyInfo.totalDeposits + amount;
+        strategyInfo.totalShares = strategyInfo.totalShares + shares;
+        userShares[msg.sender] = userShares[msg.sender] + shares;
         userLastDeposit[msg.sender] = block.timestamp;
 
         // Deploy capital
@@ -171,15 +169,15 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
     function withdraw(uint256 shares) external virtual nonReentrant returns (uint256 amount) {
         require(shares > 0, "Invalid shares");
         require(userShares[msg.sender] >= shares, "Insufficient shares");
-        require(block.timestamp >= userLastDeposit[msg.sender].add(withdrawalDelay), "Withdrawal delay not met");
+        require(block.timestamp >= userLastDeposit[msg.sender] + withdrawalDelay, "Withdrawal delay not met");
 
         // Calculate amount to withdraw
         amount = _calculateWithdrawalAmount(shares);
         require(amount > 0, "No assets to withdraw");
 
         // Update state
-        strategyInfo.totalShares = strategyInfo.totalShares.sub(shares);
-        userShares[msg.sender] = userShares[msg.sender].sub(shares);
+        strategyInfo.totalShares = strategyInfo.totalShares - shares;
+        userShares[msg.sender] = userShares[msg.sender] - shares;
 
         // Withdraw capital
         _withdrawCapital(amount);
@@ -203,13 +201,13 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
         uint256 totalDeposits = strategyInfo.totalDeposits;
 
         if (currentValue > totalDeposits) {
-            profit = currentValue.sub(totalDeposits);
+            profit = currentValue - totalDeposits;
             
             // Calculate and take performance fee
-            uint256 performanceFee = profit.mul(strategyInfo.performanceFee).div(BASIS_POINTS);
+            uint256 performanceFee = profit * strategyInfo.performanceFee / BASIS_POINTS;
             if (performanceFee > 0) {
                 _takePerformanceFee(performanceFee);
-                profit = profit.sub(performanceFee);
+                profit = profit - performanceFee;
             }
 
             // Compound remaining profit
@@ -230,7 +228,7 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
      */
     function rebalance() external virtual onlyKeeper nonReentrant {
         require(strategyInfo.isActive, "Strategy not active");
-        require(block.timestamp >= lastRebalance.add(rebalanceInterval), "Rebalance too soon");
+        require(block.timestamp >= lastRebalance + rebalanceInterval, "Rebalance too soon");
 
         _rebalancePositions();
         lastRebalance = block.timestamp;
@@ -303,7 +301,7 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
             return amount;
         }
         
-        return amount.mul(strategyInfo.totalShares).div(totalValue);
+        return amount * strategyInfo.totalShares / totalValue;
     }
 
     /**
@@ -315,7 +313,7 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
         }
         
         uint256 totalValue = totalAssets();
-        return shares.mul(totalValue).div(strategyInfo.totalShares);
+        return shares * totalValue / strategyInfo.totalShares;
     }
 
     /**
@@ -331,14 +329,14 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
      * @dev Update performance metrics
      */
     function _updatePerformanceMetrics(uint256 profit) internal {
-        performanceMetrics.totalReturns = performanceMetrics.totalReturns.add(profit);
+        performanceMetrics.totalReturns = performanceMetrics.totalReturns + profit;
         performanceMetrics.lastUpdate = block.timestamp;
         
         // Calculate annualized return
-        uint256 timePeriod = block.timestamp.sub(strategyInfo.lastHarvest);
+        uint256 timePeriod = block.timestamp - strategyInfo.lastHarvest;
         if (timePeriod > 0 && strategyInfo.totalDeposits > 0) {
-            uint256 periodReturn = profit.mul(PRECISION).div(strategyInfo.totalDeposits);
-            performanceMetrics.annualizedReturn = periodReturn.mul(365 days).div(timePeriod);
+            uint256 periodReturn = profit * PRECISION / strategyInfo.totalDeposits;
+            performanceMetrics.annualizedReturn = periodReturn * 365 days / timePeriod;
         }
     }
 
@@ -387,7 +385,7 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
         }
         
         uint256 totalValue = totalAssets();
-        return userShares[user].mul(totalValue).div(strategyInfo.totalShares);
+        return (userShares[user] * totalValue) / strategyInfo.totalShares;
     }
 
     /**
@@ -409,5 +407,12 @@ abstract contract VaultStrategyBase is AccessControl, ReentrancyGuard, Pausable 
      */
     function setActive(bool _isActive) external onlyRole(STRATEGY_MANAGER_ROLE) {
         strategyInfo.isActive = _isActive;
+    }
+    
+    /**
+     * @dev Emergency withdraw all funds
+     */
+    function emergencyWithdraw() external onlyRole(EMERGENCY_ROLE) returns (uint256) {
+        return _emergencyWithdraw();
     }
 }

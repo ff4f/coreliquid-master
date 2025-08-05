@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "../interfaces/IOracle.sol";
-import "./InterestRateModel.sol";
+import "./interestratemodel.sol";
 import "./FeeSpreadModel.sol";
 import "./CreditSaleManager.sol";
 
@@ -134,7 +134,7 @@ bool public interestDisabled = true; // Disable interest calculations
         
         interestRateModel = InterestRateModel(_interestRateModel);
         feeSpreadModel = FeeSpreadModel(_feeSpreadModel);
-        creditSaleManager = CreditSaleManager(_creditSaleManager);
+        creditSaleManager = CreditSaleManager(payable(_creditSaleManager));
         priceOracle = IOracle(_priceOracle);
         treasury = _treasury;
     }

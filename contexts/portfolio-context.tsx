@@ -43,6 +43,7 @@ export interface Position {
   healthFactor?: number
   timestamp: number
   isCollateral?: boolean
+  txHash?: string // Transaction hash for proof
   // ULP specific fields
   shares?: number
   sharePrice?: number
@@ -245,6 +246,7 @@ export type PortfolioAction =
   | { type: "UPDATE_TRANSACTION"; payload: { id: string; updates: Partial<Transaction> } }
   | { type: "ADD_RECENT_ACTIVITY"; payload: RecentActivity }
   | { type: "SET_CORE_HOLDINGS"; payload: { amount: number } }
+  | { type: "UPDATE_TOKEN_BALANCE"; payload: { symbol: string; balance: number } }
   // New actions for enhanced functionality
   | { type: "UPDATE_APR_METRICS"; payload: APRMetrics }
   | { type: "UPDATE_REVENUE_METRICS"; payload: RevenueMetrics }
@@ -278,7 +280,57 @@ const initialState: PortfolioState = {
   transactions: [],
   recentActivities: [],
   coreHoldings: 0,
-  balances: {},
+  balances: {
+    CORE: {
+      total: 10.5,
+      collateralized: 0,
+      available: 10.5,
+      borrowed: 0,
+      valueUSD: 10.5 * 1.23,
+    },
+    STCORE: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+    CLT: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+    USDT: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+    USDC: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+    WBTC: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+    WETH: {
+      total: 0,
+      collateralized: 0,
+      available: 0,
+      borrowed: 0,
+      valueUSD: 0,
+    },
+  },
   
   // Initialize enhanced metrics
   aprMetrics: {
@@ -593,6 +645,23 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
         ...state,
         coreHoldings: action.payload.amount,
         ...updatedState,
+      }
+    }
+
+    case "UPDATE_TOKEN_BALANCE": {
+      const tokenData = getTokenData(action.payload.symbol)
+      const updatedBalances = {
+        ...state.balances,
+        [action.payload.symbol]: {
+          ...state.balances[action.payload.symbol],
+          total: action.payload.balance,
+          available: Math.max(0, action.payload.balance - (state.balances[action.payload.symbol]?.collateralized || 0)),
+          valueUSD: action.payload.balance * tokenData.price,
+        },
+      }
+      return {
+        ...state,
+        balances: updatedBalances,
       }
     }
 

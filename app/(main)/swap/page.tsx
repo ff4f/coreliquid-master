@@ -121,13 +121,59 @@ export default function SwapPage() {
     setIsProcessing(true)
 
     try {
-      // Simulate swap processing
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      // Import contracts and ethers
+       const { CoreFluidXContracts } = await import('@/lib/contracts')
+       const { ethers } = await import('ethers')
+       
+       // Get provider and signer
+       if (!window.ethereum) {
+         throw new Error('Please install MetaMask to use swap functionality')
+       }
+       
+       const provider = new ethers.BrowserProvider(window.ethereum)
+       const signer = await provider.getSigner()
+       const contracts = new CoreFluidXContracts(provider, signer)
+      
+      // Calculate minimum amount out with slippage tolerance
+      const slippageTolerance = Number.parseFloat(slippage) / 100
+      const minAmountOut = (Number.parseFloat(estimatedOutput) * (1 - slippageTolerance)).toString()
+      
+      // Execute the actual swap
+      const tx = await contracts.executeSwap(
+        fromToken,
+        toToken,
+        fromAmount,
+        minAmountOut
+      )
+      
+      // Wait for transaction confirmation
+      const receipt = await tx.wait()
 
       const fromTokenDataPrice = getTokenData(fromToken)
       const fromValueUSD = amountToSwap * fromTokenDataPrice.price
+      
+      // Update balances after successful swap
+      const outputAmount = Number.parseFloat(estimatedOutput)
+      
+      // Decrease fromToken balance
+      dispatch({
+        type: "UPDATE_TOKEN_BALANCE",
+        payload: {
+          symbol: fromToken,
+          balance: Math.max(0, (state.balances[fromToken]?.total || 0) - amountToSwap)
+        }
+      })
+      
+      // Increase toToken balance
+      dispatch({
+        type: "UPDATE_TOKEN_BALANCE",
+        payload: {
+          symbol: toToken,
+          balance: (state.balances[toToken]?.total || 0) + outputAmount
+        }
+      })
 
-      // Add recent activity for swap
+      // Add recent activity for swap with real transaction hash
       const swapActivity = {
         id: `swap-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         type: "swap" as const,
@@ -137,24 +183,73 @@ export default function SwapPage() {
         toToken: toToken,
         valueUSD: fromValueUSD,
         timestamp: Date.now(),
-        hash: `0x${Math.random().toString(16).substr(2, 64)}`,
+        hash: receipt.hash,
       }
 
       dispatch({ type: "ADD_RECENT_ACTIVITY", payload: swapActivity })
 
       toast({
         title: "Swap Successful",
-        description: `Successfully swapped ${fromAmount} ${fromToken} for ${estimatedOutput} ${toToken}`,
+        description: (
+          <div className="flex flex-col gap-2">
+            <div>Successfully swapped {fromAmount} {fromToken} for {estimatedOutput} {toToken}</div>
+            <div className="text-xs opacity-75">
+              Transaction: {receipt.hash.slice(0, 10)}...{receipt.hash.slice(-8)}
+            </div>
+            <a 
+              href={`https://scan.test2.btcs.network/tx/${receipt.hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 text-xs underline"
+            >
+              View on CoreScan →
+            </a>
+          </div>
+        ),
         variant: "default",
       })
 
       // Reset form
       setFromAmount("")
       setToAmount("")
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Swap error:', error)
+      
+      const fromTokenDataPrice = getTokenData(fromToken)
+      const fromValueUSD = amountToSwap * fromTokenDataPrice.price
+      
+      // Add failed transaction to activities
+      const failedSwapActivity = {
+        id: `swap-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: "swap" as const,
+        status: "failed" as const,
+        amount: amountToSwap,
+        token: fromToken,
+        toToken: toToken,
+        valueUSD: fromValueUSD,
+        timestamp: Date.now(),
+        hash: error.hash || 'failed',
+      }
+      
+      dispatch({ type: "ADD_RECENT_ACTIVITY", payload: failedSwapActivity })
+      
       toast({
         title: "Swap Failed",
-        description: "Failed to process swap. Please try again.",
+        description: (
+          <div className="flex flex-col gap-2">
+            <div>Swap failed: {error.message || 'Unknown error'}</div>
+            {error.hash && (
+              <a 
+                href={`https://scan.test2.btcs.network/tx/${error.hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 text-xs underline"
+              >
+                View failed transaction →
+              </a>
+            )}
+          </div>
+        ),
         variant: "destructive",
       })
     } finally {
@@ -557,12 +652,29 @@ export default function SwapPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <Badge variant="outline" className="border-green-500 text-green-500 font-mono">
+                    <Badge 
+                      variant="outline" 
+                      className={`font-mono ${
+                        swap.status === 'completed' 
+                          ? 'border-green-500 text-green-500' 
+                          : 'border-red-500 text-red-500'
+                      }`}
+                    >
                       {swap.status.toUpperCase()}
                     </Badge>
                     <p className="text-xs text-gray-400 mt-1 font-mono">
                       {Math.floor((Date.now() - swap.timestamp) / (1000 * 60))}m ago
                     </p>
+                    {swap.hash && swap.hash !== 'failed' && (
+                      <a 
+                        href={`https://scan.test2.btcs.network/tx/${swap.hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:text-blue-300 underline font-mono block mt-1"
+                      >
+                        {swap.hash.slice(0, 6)}...{swap.hash.slice(-4)}
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}

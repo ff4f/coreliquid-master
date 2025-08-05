@@ -213,7 +213,8 @@ export default function OptimizedTULLPage() {
     navigator.clipboard.writeText(text);
   };
   
-  const formatAddress = (addr: string) => {
+  const formatAddress = (addr: string | undefined) => {
+    if (!addr || typeof addr !== 'string') return 'N/A';
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
   
@@ -277,13 +278,13 @@ export default function OptimizedTULLPage() {
               </div>
             </div>
             <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-              <span className="text-sm font-medium">CORE Token</span>
+              <span className="text-sm font-medium">CORE Liquid Token</span>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono">{formatAddress(CONTRACT_ADDRESSES.CORE_TOKEN)}</span>
+                <span className="text-xs font-mono">{formatAddress(CONTRACT_ADDRESSES.CORE_LIQUID_TOKEN)}</span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => copyToClipboard(CONTRACT_ADDRESSES.CORE_TOKEN)}
+                  onClick={() => copyToClipboard(CONTRACT_ADDRESSES.CORE_LIQUID_TOKEN)}
                 >
                   <Copy className="w-3 h-3" />
                 </Button>
@@ -318,7 +319,7 @@ export default function OptimizedTULLPage() {
               <SelectValue placeholder="Select an asset" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={CONTRACT_ADDRESSES.CORE_TOKEN}>CORE Token</SelectItem>
+              <SelectItem value={CONTRACT_ADDRESSES.CORE_LIQUID_TOKEN}>CORE Liquid Token</SelectItem>
               <SelectItem value={CONTRACT_ADDRESSES.BTC_TOKEN}>BTC Token</SelectItem>
             </SelectContent>
           </Select>
