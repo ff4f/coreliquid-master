@@ -9,8 +9,6 @@
 ## Deployment Details
 - **Deployer Address:** `0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38`
 - **Target User Address:** `0x22A196A5D71B30542a9EEd349BE98DE352Fdb565`
-- **Private Key Used:** `0x547319fd1f45871090b38a84c075dc6155012fddcf4024bf0b202f193e9878b6`
-- **Deployment Date:** January 2025
 
 ---
 
